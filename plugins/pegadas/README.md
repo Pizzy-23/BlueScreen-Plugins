@@ -22,7 +22,7 @@ Cada ação fica sob o pedido que a gerou, e os pedidos sob o dia. Edições seg
 
 ## Chamados
 
-Números de chamado citados no pedido viram filtro na barra lateral. O padrão é uma regex nas configurações do plugin; vazio, reconhece chaves no formato PROJ-123, como as do Jira e o DEM-001 do Dashboard. O pedido seguinte, em até 30 min e sem número próprio, herda o chamado (borda tracejada). O resumo por chamado pode ser copiado ou registrado no Dashboard, e a tarefa do Dashboard tem o botão "Pegadas".
+Números de chamado citados no pedido viram filtro na barra lateral. O padrão é uma regex nas configurações do plugin; vazio, reconhece chaves no formato PROJ-123, como as do Jira e o DEM-001 do Dashboard. O pedido seguinte, em até 30 min e sem número próprio, herda o chamado (borda tracejada). Sem número no texto, dá para marcar à mão: **+ chamado no pedido** ou **+ chamado na sessão** aceita um número ou um nome livre ("login do Viagem"), que vira filtro igual a um chamado; o × no selo tira a marca. As marcas ficam em `plugin-data/pegadas/rotulos.json`. A busca de texto também procura no texto do pedido. O resumo por chamado pode ser copiado ou registrado no Dashboard, e a tarefa do Dashboard tem o botão "Pegadas".
 
 ## Ações sensíveis
 

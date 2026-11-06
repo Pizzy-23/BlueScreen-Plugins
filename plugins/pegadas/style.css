@@ -134,3 +134,8 @@
 #caScreen .ca-arq-pedido, #caScreen .ca-versoes details { min-width: 0; }
 #caScreen .ca-arq-pedido .ca-diff, #caScreen .ca-versoes .ca-diff { max-width: 100%; }
 #caScreen .ca-chamado.herdado { border-style: dashed; opacity: .75; }
+#caScreen .ca-chamado.manual { display: inline-flex; align-items: stretch; padding: 0; border-style: solid; cursor: default; }
+#caScreen .ca-chamado.manual:hover { background: none; color: var(--accent); }
+#caScreen .ca-chamado-nome, #caScreen .ca-chamado-tirar { padding: 0 6px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+#caScreen .ca-chamado-nome:hover, #caScreen .ca-chamado-tirar:hover { background: var(--accent); color: var(--bg); }
+#caScreen .ca-chamado-tirar { border-left: 1px solid var(--accent); }

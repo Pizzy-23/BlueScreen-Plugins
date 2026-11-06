@@ -147,14 +147,18 @@ function linhaDoTempo() {
     if (b.dia !== diaAtual) { diaAtual = b.dia; html += `<h2 class="ca-dia">${esc(b.dia)}</h2>`; }
     const arquivos = b.itens.filter((x) => x.tipo === 'arquivo').length;
     const chamados = b.pedido?.chamados || b.itens[0].chamados || [];
+    const manuais = b.pedido?.manuais || { pedido: [], sessao: [] };
+    const origem = (c) => (manuais.pedido.includes(c) ? 'pedido' : manuais.sessao.includes(c) ? 'sessao' : '');
     html += `<section class="ca-bloco">
       <header>
-        <div class="ca-pedido">${b.agente ? '<span class="ca-sub">subagente</span>' : ''}${chamados.map((c) => `<button type="button" class="ca-chamado${b.pedido?.herdado ? ' herdado' : ''}" data-chamado="${esc(c)}" title="${b.pedido?.herdado ? 'Deduzido: citado no pedido anterior desta sessão' : 'Citado neste pedido'}">${esc(c)}</button>`).join('')}${esc(curto(b.pedido?.texto || '(sem o pedido nesta janela)', 220))}</div>
+        <div class="ca-pedido">${b.agente ? '<span class="ca-sub">subagente</span>' : ''}${chamados.map((c) => chipChamado(c, origem(c), b)).join('')}${esc(curto(b.pedido?.texto || '(sem o pedido nesta janela)', 220))}</div>
         <div class="ca-meta"><span title="${esc(b.sessao?.cwd || '')}">${esc(b.sessao?.titulo || 'sessão ' + String(b.itens[0].sessao).slice(0, 8))}</span><span>${b.itens.length} ação(ões)${arquivos ? `, ${arquivos} em arquivo` : ''}</span>${metricasPedido(b.pedido)}</div>
         <div class="ca-bloco-acoes">
           ${arquivos ? `<button type="button" class="ca-link ca-ver-pedido" data-pedido="${esc(b.pedidoId)}">mudanças do pedido</button><button type="button" class="ca-link ca-desfazer-pedido" data-pedido="${esc(b.pedidoId)}">desfazer pedido</button>` : ''}
           <button type="button" class="ca-link ca-resumo-pedido" data-pedido="${esc(b.pedidoId)}">copiar resumo</button>
           <button type="button" class="ca-link ca-so-sessao" data-sessao="${esc(b.itens[0].sessao)}">só esta sessão</button>
+          ${b.pedidoId ? `<button type="button" class="ca-link ca-rotular" data-alvo="pedido" data-id="${esc(b.pedidoId)}" title="Dar um chamado ou um nome a este pedido">+ chamado no pedido</button>` : ''}
+          <button type="button" class="ca-link ca-rotular" data-alvo="sessao" data-id="${esc(b.itens[0].sessao)}" title="Dar um chamado ou um nome a todos os pedidos desta sessão">+ chamado na sessão</button>
         </div>
       </header>
       <ol>${agrupar(b.itens).map(linhaEvento).join('')}</ol>
@@ -162,6 +166,23 @@ function linhaDoTempo() {
   }
   if (A.dados.cortados) html += `<p class="ca-vazio">+ ${A.dados.cortados} ações mais antigas. Diminua o período ou filtre.</p>`;
   return html;
+}
+
+function chipChamado(c, manual, b) {
+  if (manual) {
+    const id = manual === 'pedido' ? b.pedidoId : b.itens[0].sessao;
+    return `<span class="ca-chamado manual" title="Marcado à mão ${manual === 'pedido' ? 'neste pedido' : 'na sessão'}"><button type="button" class="ca-chamado-nome" data-chamado="${esc(c)}">${esc(c)}</button><button type="button" class="ca-chamado-tirar" data-alvo="${manual}" data-id="${esc(id)}" data-nome="${esc(c)}" title="Tirar">×</button></span>`;
+  }
+  const herdado = b.pedido?.herdado;
+  return `<button type="button" class="ca-chamado${herdado ? ' herdado' : ''}" data-chamado="${esc(c)}" title="${herdado ? 'Deduzido: citado no pedido anterior desta sessão' : 'Citado neste pedido'}">${esc(c)}</button>`;
+}
+
+async function rotular(alvo, id, nome, remover) {
+  try {
+    const j = await chamar('rotulo', {}, { alvo, id, nome, remover });
+    toast(remover ? `${j.rotulo} tirado` : `Marcado como ${j.rotulo}`, 'ok');
+    await carregar();
+  } catch (err) { toast('Erro: ' + err.message, 'err'); }
 }
 
 function vistaSessoes() {
@@ -263,7 +284,14 @@ function ligar(raiz) {
     b.onclick = () => { Object.assign(A, { semAlvo: b.dataset.sem === '1', grupo: b.dataset.grupo || '', alvo: b.dataset.alvo || '', chamado: b.dataset.chamado || '', sessao: '' }); carregar(); };
   });
   raiz.querySelector('.ca-limpar')?.addEventListener('click', () => { Object.assign(A, { grupo: '', alvo: '', semAlvo: false, busca: '', chamado: '', sessao: '', sensiveis: false }); carregar(); });
-  sel('.ca-chamado').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); Object.assign(A, { chamado: b.dataset.chamado, grupo: '', alvo: '', semAlvo: false, sessao: '' }); carregar(); }; });
+  sel('.ca-rotular').forEach((b) => {
+    b.onclick = () => {
+      const nome = prompt(b.dataset.alvo === 'sessao' ? 'Chamado ou nome para todos os pedidos desta sessão' : 'Chamado ou nome para este pedido', A.chamado || '');
+      if (nome && nome.trim()) rotular(b.dataset.alvo, b.dataset.id, nome);
+    };
+  });
+  sel('.ca-chamado-tirar').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); rotular(b.dataset.alvo, b.dataset.id, b.dataset.nome, true); }; });
+  sel('.ca-chamado:not(.manual), .ca-chamado-nome').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); Object.assign(A, { chamado: b.dataset.chamado, grupo: '', alvo: '', semAlvo: false, sessao: '' }); carregar(); }; });
   sel('.ca-so-sessao').forEach((b) => { b.onclick = () => { Object.assign(A, { sessao: b.dataset.sessao, busca: '' }); carregar(); }; });
   sel('.ca-ver-pedido').forEach((b) => { b.onclick = () => abrirPedido(b.dataset.pedido); });
   sel('.ca-desfazer-pedido').forEach((b) => { b.onclick = () => previaRestaurar('pedido', b.dataset.pedido); });

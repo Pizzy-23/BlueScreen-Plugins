@@ -27,6 +27,9 @@ const ARQUIVO = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 const COMANDO = new Set(['Bash', 'PowerShell']);
 const PASTA_DADOS = process.env.BLUESCREEN_PLUGIN_DATA || path.join(HOME, '.bluescreen', 'plugin-data', 'pegadas');
 
+const ARQ_ROTULOS = path.join(PASTA_DADOS, 'rotulos.json');
+const MAX_ROTULO = 60;
+
 const E = { arquivos: new Map(), eventos: [], porId: new Map(), pedidos: new Map(), sessoes: new Map(), ultimaVarredura: 0, rev: 0 };
 
 async function config() {
@@ -35,6 +38,55 @@ async function config() {
   const dias = Number(cfg.dias) > 0 ? Number(cfg.dias) : DIAS_PADRAO;
   definirPadraoChamado(String(cfg.chamados || '').trim());
   return { pasta: String(cfg.pasta || '').trim() || path.join(HOME, '.claude', 'projects'), dias };
+}
+
+function lerRotulos() {
+  try {
+    const r = JSON.parse(fs.readFileSync(ARQ_ROTULOS, 'utf8'));
+    return { pedidos: r.pedidos || {}, sessoes: r.sessoes || {} };
+  } catch { return { pedidos: {}, sessoes: {} }; }
+}
+
+const R = lerRotulos();
+const unicos = (lista) => [...new Set(lista)];
+const rotulosDe = (pedido, sessao) => ({ pedido: R.pedidos[pedido] || [], sessao: R.sessoes[sessao] || [] });
+
+function chamadosCom(auto, pedido, sessao) {
+  const r = rotulosDe(pedido, sessao);
+  return unicos([...auto, ...r.sessao, ...r.pedido]);
+}
+
+function reaplicarRotulos() {
+  for (const pd of E.pedidos.values()) {
+    pd.chamados = chamadosCom(pd.auto, pd.id, pd.sessao);
+    pd.manuais = rotulosDe(pd.id, pd.sessao);
+  }
+  for (const ev of E.eventos) ev.chamados = E.pedidos.get(ev.pedido)?.chamados || chamadosCom([], '', ev.sessao);
+}
+
+function normalizarRotulo(nome) {
+  const t = String(nome ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_ROTULO);
+  if (!t) throw new Error('Diga o chamado ou o nome');
+  const [numero] = chamadosDe(t);
+  return numero && numero.length === t.length ? numero : t;
+}
+
+function rotular({ alvo, id, nome, remover }) {
+  const mapa = alvo === 'sessao' ? R.sessoes : alvo === 'pedido' ? R.pedidos : null;
+  if (!mapa) throw new Error('alvo precisa ser "pedido" ou "sessao"');
+  if (!id) throw new Error('Falta o id do ' + alvo);
+  if (alvo === 'pedido' && !E.pedidos.has(id)) throw new Error('Pedido não encontrado');
+  if (alvo === 'sessao' && !E.sessoes.has(id)) throw new Error('Sessão não encontrada');
+  const rotulo = normalizarRotulo(nome);
+  const atuais = mapa[id] || [];
+  const novos = remover ? atuais.filter((x) => x.toLowerCase() !== rotulo.toLowerCase()) : unicos([...atuais, rotulo]);
+  if (novos.length) mapa[id] = novos; else delete mapa[id];
+  fs.mkdirSync(PASTA_DADOS, { recursive: true });
+  fs.writeFileSync(ARQ_ROTULOS + '.tmp', JSON.stringify(R, null, 2));
+  fs.renameSync(ARQ_ROTULOS + '.tmp', ARQ_ROTULOS);
+  reaplicarRotulos();
+  E.rev++;
+  return { rotulo, rotulos: novos };
 }
 
 const usoVazio = () => ({ entrada: 0, saida: 0, cacheLido: 0, cacheCriado: 0 });
@@ -86,7 +138,7 @@ function criarEvento(estado, uso, bloco, resultado, ts, fonte) {
   const pedido = E.pedidos.get(estado.pedido);
   const base = {
     id: uso.id, ts: uso.ts, fimTs: ts, duracaoMs: uso.ts && ts ? Math.max(0, Date.parse(ts) - Date.parse(uso.ts)) : 0,
-    sessao: estado.sessao, agente: estado.agente || '', pedido: estado.pedido, chamados: pedido?.chamados || [],
+    sessao: estado.sessao, agente: estado.agente || '', pedido: estado.pedido, chamados: pedido?.chamados || chamadosCom([], '', estado.sessao),
     ferramenta: nome, erro: Boolean(bloco.is_error), fonte,
   };
   let ev;
@@ -175,9 +227,10 @@ function processarLinha(estado, linha, limite, fonte) {
     const herda = !citados.length && estado.chamados.length && estado.herancas <= HERANCA_PEDIDOS
       && (!ts || !estado.chamadosTs || Date.parse(ts) - Date.parse(estado.chamadosTs) <= HERANCA_MS);
     if (ts && ts < limite) return;
+    const auto = citados.length ? citados : herda ? estado.chamados : [];
     E.pedidos.set(id, {
       id, ts, fim: ts, sessao: estado.sessao, agente: estado.agente || '', texto,
-      chamados: citados.length ? citados : herda ? estado.chamados : [], herdado: Boolean(herda),
+      auto, chamados: chamadosCom(auto, id, estado.sessao), manuais: rotulosDe(id, estado.sessao), herdado: Boolean(herda),
       uso: usoVazio(), modelos: new Set(), acoes: 0, mudancas: 0, comandos: 0, falhas: 0, sensiveis: 0, cmdMs: 0, contagemCmd: new Map(),
     });
     s.pedidos++;
@@ -280,7 +333,7 @@ function filtrar(q) {
     if (q.chamado && !ev.chamados.includes(q.chamado)) return false;
     if (q.grupo && !ev.alvos.some((a) => a.grupo === q.grupo && (!q.alvo || a.id === q.alvo))) return false;
     if (q.semAlvo === '1' && ev.alvos.length) return false;
-    if (termo && ![ev.caminho, ev.comando, ev.titulo, ev.saida].some((v) => String(v || '').toLowerCase().includes(termo))) return false;
+    if (termo && ![ev.caminho, ev.comando, ev.titulo, ev.saida, E.pedidos.get(ev.pedido)?.texto].some((v) => String(v || '').toLowerCase().includes(termo))) return false;
     return true;
   });
 }
@@ -506,6 +559,7 @@ rota('novas', async (q) => {
     hoje: { mudancas: deHoje.filter((ev) => ev.tipo === 'arquivo').length, comandos: deHoje.filter((ev) => ev.tipo !== 'arquivo').length, sensiveis: deHoje.filter((ev) => ev.riscos.length).length },
   };
 });
+rota('rotulo', rotular, { escrita: true });
 rota('marcas', async (q) => ({ marcas: marcasDe(q.caminho) }));
 rota('resumo', async (q) => {
   const lista = filtrar({ dias: q.dias || 30, chamado: q.chamado, pedido: q.pedido, consultas: '' });
@@ -530,5 +584,5 @@ rota('recarregar', async () => {
 p.run().once('listening', async () => {
   const t = Date.now();
   await varrer(true);
-  console.log(`  Atividade do Claude: ${E.eventos.length} ação(ões) em ${E.arquivos.size} transcript(s), ${Date.now() - t} ms`);
+  console.log(`  Pegadas: ${E.eventos.length} ação(ões) em ${E.arquivos.size} transcript(s), ${Date.now() - t} ms`);
 });
