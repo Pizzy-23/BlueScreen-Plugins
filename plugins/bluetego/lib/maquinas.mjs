@@ -6,9 +6,9 @@
 export const MAQUINAS = [
   {
     id: 'pegada-dominio', de: 'dominio', escopo: true, nome: 'Pegada do domínio',
-    descricao: 'DNS, registro, serviços no TXT, subdomínios, IPs de cada um, quem hospeda e o que está exposto.',
+    descricao: 'DNS, registro, contatos do site (telefones, WhatsApp, CNPJ com a razão social, endereço, redes sociais), serviços no TXT, subdomínios, IPs de cada um, quem hospeda e o que está exposto.',
     passos: [
-      { t: 'dns-ip' }, { t: 'dns-mx' }, { t: 'dns-ns' }, { t: 'dns-txt' }, { t: 'rdap-dominio' }, { t: 'certificado' }, { t: 'tecnologias' }, { t: 'seguranca-email' }, { t: 'popularidade' }, { t: 'rastreadores' }, { t: 'rastreador-sites', max: 4 }, { t: 'subdominios' },
+      { t: 'dns-ip' }, { t: 'dns-mx' }, { t: 'dns-ns' }, { t: 'dns-txt' }, { t: 'rdap-dominio' }, { t: 'certificado' }, { t: 'tecnologias' }, { t: 'contatos-site' }, { t: 'cnpj', max: 3 }, { t: 'seguranca-email' }, { t: 'popularidade' }, { t: 'rastreadores' }, { t: 'rastreador-sites', max: 4 }, { t: 'subdominios' },
       { t: 'dns-ip', max: 30 }, { t: 'ip-asn', max: 20 }, { t: 'geo', max: 20 }, { t: 'internetdb', max: 20 }, { t: 'asn-dono' },
     ],
   },
@@ -64,7 +64,7 @@ export const MAQUINAS = [
   },
   {
     id: 'telefone', de: 'telefone', nome: 'Rastro do telefone',
-    descricao: 'Tipo e região do número, links do WhatsApp, Telegram e Signal, onde ele aparece na web (em todos os jeitos de escrever) e o que as páginas achadas citam.',
-    passos: [{ t: 'telefone' }, { t: 'web', tipos: ['telefone'] }, { t: 'url-dominio', max: 10 }, { t: 'email-dominio', max: 5 }],
+    descricao: 'Tipo, operadora original e região do número, organizações e estabelecimentos com este telefone (Wikidata, OpenStreetMap), links do WhatsApp, Telegram e Signal, onde ele aparece na web (em todos os jeitos de escrever) e o que as páginas achadas citam.',
+    passos: [{ t: 'telefone' }, { t: 'telefone-wikidata' }, { t: 'telefone-osm' }, { t: 'web', tipos: ['telefone'] }, { t: 'url-dominio', max: 10 }, { t: 'email-dominio', max: 5 }],
   },
 ];

@@ -213,8 +213,9 @@ caso('conta-apelido e telefone (locais)', async () => {
   assert.deepEqual((await rodar('conta-apelido', 'conta', 'https://www.linkedin.com/in/fulano-tal/', falso({}))).entidades.map((e) => e.valor), ['fulano-tal']);
   const t = await rodar('telefone', 'telefone', '+55 11 3000-0000', falso({}));
   assert.equal(t.entidades[0].valor, 'São Paulo e Grande SP (SP)'); assert.equal(t.props.tipo, 'fixo');
-  // fixo não ganha links de app de mensagem; celular ganha WhatsApp, Telegram e Signal
-  assert.equal(t.entidades.length, 1);
+  // fixo não ganha links de app de mensagem (ganha a cidade pelo prefixo); celular ganha WhatsApp, Telegram e Signal
+  assert.deepEqual(t.entidades.map((e) => e.tipo), ['local', 'local']);
+  assert.equal(t.entidades[1].ligacao, 'cidade do telefone fixo');
   const c = await rodar('telefone', 'telefone', '(51) 99999-1234', falso({}));
   assert.deepEqual(c.entidades.filter((e) => e.tipo === 'conta').map((e) => e.valor), ['https://wa.me/5551999991234', 'https://t.me/+5551999991234', 'https://signal.me/#p/+5551999991234']);
   assert.match(c.props['jeitos de escrever'], /\(51\) 99999-1234/);

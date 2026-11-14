@@ -125,7 +125,12 @@ export function normalizar(tipo, valor) {
     case 'cpf': { const d = v.replace(/\D/g, ''); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : v; }
     case 'cep': { const d = v.replace(/\D/g, ''); return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : v; }
     case 'cnpj': { const d = v.replace(/\D/g, ''); return d.length === 14 ? `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}` : v; }
-    case 'telefone': { const d = v.replace(/[^\d+]/g, ''); if (d.startsWith('+')) return '+' + d.slice(1).replace(/\+/g, ''); return telefoneBR(d) || d; }
+    case 'telefone': {
+      const d = v.replace(/[^\d+]/g, '');
+      if (d.startsWith('+')) { const x = '+' + d.slice(1).replace(/\+/g, ''); return (/^\+55\d{10}$/.test(x) && telefoneBR(x.slice(3))) || x; }
+      // 55 sem o + (link tel:55…) e o 0 de discagem na frente do DDD (051 3333-4444) viram o mesmo número
+      return telefoneBR(d) || (/^55\d{10,11}$/.test(d) && telefoneBR(d.slice(2))) || (/^0\d{10,11}$/.test(d) && telefoneBR(d.slice(1))) || d;
+    }
     case 'url': try { const u = new URL(v); u.hash = ''; return u.href; } catch { return v; }
     default: return v.replace(/\s+/g, ' ');
   }
@@ -196,6 +201,8 @@ export function telefoneBR(s) {
   if (/^0(800|300|500|900)\d{6,7}$/.test(d)) return d;
   if (/^[34]00[0-9]\d{4}$/.test(d)) return d;
   if ((d.length === 10 || d.length === 11) && dddValido(d.slice(0, 2)) && (d.length === 10 ? /^[2-5]/.test(d[2]) : d[2] === '9')) return '+55' + d;
+  // celular escrito no formato antigo, de 8 dígitos (antes do nono dígito): 51 9955-3811 é hoje 51 99955-3811
+  if (d.length === 10 && dddValido(d.slice(0, 2)) && /^[6-9]/.test(d[2])) return '+55' + d.slice(0, 2) + '9' + d.slice(2);
   return '';
 }
 export function telefoneInfo(valor) {
@@ -221,6 +228,8 @@ export function telefoneInfo(valor) {
         // os jeitos de escrever o mesmo número que costumam aparecer em sites e documentos
         formatos: [n, `+55 ${ddd} ${parte}`, `(${ddd}) ${parte}`, `${ddd} ${parte}`, `${ddd}${num}`, `0${ddd}${num}`],
       });
+      // celular que já teve 8 dígitos: páginas antigas citam o número sem o nono dígito
+      if (celular && /^[6-9]/.test(num[1])) { const v = num.slice(1); info.antigo = `(${ddd}) ${v.slice(0, 4)}-${v.slice(4)}`; info.formatos.push(info.antigo, `${ddd} ${v.slice(0, 4)}-${v.slice(4)}`, `${ddd}${v}`); }
     }
   }
   return info;

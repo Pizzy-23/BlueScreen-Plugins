@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.5.0 |
+| **Versão** | 0.6.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 86 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 90 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -105,6 +105,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Domínio | ⚡ IDs de rastreamento (Google Analytics, AdSense, Tag Manager, Meta Pixel, Hotjar, Clarity) | o próprio site |
 | ID de rastreamento | ⚡ Outros sites com o mesmo ID (costumam ser do mesmo dono) | HackerTarget |
 | Domínio | Ler o site: título, e-mails, telefones, perfis sociais, domínios citados | o próprio site |
+| Domínio, URL | Dados de contato do site: telefones, WhatsApp, e-mails, CNPJ (com a razão social pela Receita), endereço e CEP, redes sociais (Instagram, Facebook, LinkedIn, YouTube, TikTok, X, Threads, Pinterest…), lidos da página inicial, das páginas de contato, institucionais e de privacidade, e dos dados estruturados (schema.org) | o próprio site |
 | Domínio | Endereços arquivados, primeiro os que interessam (backups, painéis, APIs, `.env`) | Wayback Machine |
 | Domínio | Contatos de segurança: `security.txt` e o responsável no SOA | o próprio site + DNS |
 | Domínio | Domínios parecidos registrados (letra trocada, final diferente, palavra a mais, até 260 variações) | DNS |
@@ -142,7 +143,9 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | CNPJ | ⚡ Razão social, nome fantasia, sócios (empresas sócias viram CNPJ), endereço, CEP, telefone, e-mail, regime (Simples, MEI), atividades, matriz da filial | Receita (BrasilAPI, com a Minha Receita de reserva) |
 | CPF | ⚡ Validar e ver a região fiscal de emissão | local |
 | CEP | ⚡ Endereço e coordenadas | BrasilAPI |
-| Telefone | ⚡ Tipo (celular, fixo, 0800, 4004), estado e região pelo DDD, os jeitos de escrever, links do WhatsApp, Telegram e Signal | local |
+| Telefone | ⚡ Tipo (celular, fixo, 0800, 4004), estado e região pelo DDD, operadora original da faixa, cidade do fixo pelo prefixo, os jeitos de escrever (inclusive o formato antigo de 8 dígitos do celular), links do WhatsApp, Telegram e Signal | local + libphonenumber |
+| Telefone | Organização que publica este telefone · estabelecimento com este telefone no mapa (nome, endereço, site, e-mail; leva até 1 minuto) | Wikidata, OpenStreetMap (Overpass) |
+| Telefone | Reputação de spam e golpe: nota, avaliações e categoria (sem os comentários) | tellows |
 | Local | ⚡ Coordenadas e mapa | OpenStreetMap |
 | Carteira cripto | ⚡ Saldo e as carteiras que mais mandaram e receberam | Blockstream |
 | Vulnerabilidade | ⚡ Resumo, CVSS e EPSS (chance de exploração) | MITRE + FIRST |
@@ -161,7 +164,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 
 | Máquina | Começa em | O que faz |
 |---|---|---|
-| **Pegada do domínio** | Domínio | DNS, registro, certificado, tecnologias, subdomínios, os IPs de cada um, quem hospeda e o que está exposto |
+| **Pegada do domínio** | Domínio | DNS, registro, contatos do site (telefones, WhatsApp, CNPJ com a razão social, endereço, redes sociais), certificado, tecnologias, subdomínios, os IPs de cada um, quem hospeda e o que está exposto |
 | **Superfície de ataque** | Domínio | subdomínios de 4 fontes, exploração do site (robots, JavaScript, `.git`, `.env`), documentos, certificados, tecnologias, contatos de segurança, IPs, portas, CVEs e a Wayback Machine |
 | **Pessoas da empresa** | Domínio | autores e usuários nos documentos públicos, e-mails e perfis no site e no registro; Gravatar dos e-mails e contas dos perfis |
 | **Golpes com a marca** | Domínio | domínios parecidos registrados; quais recebem e-mail, têm certificado, aparecem em relatórios de ameaça e quem registrou |
@@ -171,7 +174,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | **Rastro do apelido** | Apelido | contas em 18 sites com os dados de cada perfil e em centenas de outros, o GitHub a fundo, a web e o Gravatar dos e-mails |
 | **Pegada da pessoa** | Pessoa | Quantas pessoas têm o nome (IBGE), Wikidata, ORCID, Wikipédia, mandatos na Câmara e no Senado, sanções, TCU, processos no STF, Diário Oficial da União, Offshore Leaks, livros, Nobel, chaves PGP, contas com o nome (GitHub, Bluesky, fediverso, Stack Overflow, Launchpad), a web, e os apelidos prováveis com as contas que existem |
 | **Empresa brasileira** | CNPJ | Receita, as empresas sócias e a matriz, CEP, Wikidata e o domínio do e-mail |
-| **Rastro do telefone** | Telefone | tipo e região, apps de mensagem, onde o número aparece na web e o que essas páginas citam |
+| **Rastro do telefone** | Telefone | tipo, operadora original e região, organizações e estabelecimentos com este telefone (Wikidata, OpenStreetMap), apps de mensagem, onde o número aparece na web e o que essas páginas citam |
 | **Rastro da carteira** | Carteira cripto | saldo e as carteiras que mais mandaram e receberam, e o mesmo para cada uma delas |
 
 Cada passo tem um teto de entidades, a máquina para sozinha depois de 600 entidades novas, e o × na barra de progresso para tudo.
@@ -197,11 +200,11 @@ Aba Plugins › engrenagem do Bluetego:
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
 - **CPF:** o Bluetego valida o CPF e mostra a região fiscal de emissão, e cruza com o CPF mascarado que a Receita publica dos sócios. Ele **não** descobre de quem é um CPF nem procura CPF na web: as fontes que fazem isso usam bases vazadas, e o Bluetego não usa.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
-- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
+- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). A numeração de telefones vem do libphonenumber do Google (Apache-2.0, em `vendor/libphonenumber`), os dados do mapa são do OpenStreetMap (ODbL, © colaboradores do OpenStreetMap) e o Wikidata é CC0. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
 - **E-mail escondido não é revelado:** o Launchpad acha a conta de um e-mail mesmo quando o dono escolheu escondê-lo, e por isso o Bluetego só consulta o Launchpad por nome e apelido. Nome em chave PGP do keyserver.ubuntu.com é autodeclarado (qualquer um publica uma chave com qualquer nome), e a ligação diz isso.
 - **Nome completo e homônimos:** as fontes de nome só consultam com nome e sobrenome e só aceitam um resultado quando todas as palavras do nome aparecem nele (em qualquer ordem, sem acento). Processo, ato do Diário Oficial, sanção e menção em vazamento continuam podendo ser de um homônimo: a ligação diz isso, e as propriedades trazem o que serve para conferir (nascimento, município, cargo, trecho).
 - **CPF do TCU é descartado:** a lista de inabilitados e inidôneos do TCU publica o CPF completo; o Bluetego não mostra, não guarda e não cria entidade com ele.
-- **Para onde vão os valores:** cada transformação manda o valor à fonte da tabela acima. "Ler o site", "Tecnologias", "Certificado" e "Seguir redirecionamentos" acessam o próprio site do alvo, que vê o seu IP.
+- **Para onde vão os valores:** cada transformação manda o valor à fonte da tabela acima. "Ler o site", "Dados de contato do site" (a inicial e até 5 páginas de contato linkadas nela), "Tecnologias", "Certificado" e "Seguir redirecionamentos" acessam o próprio site do alvo, que vê o seu IP.
 - **IA:** o resumo do grafo (valores, propriedades e anotações) vai para o provedor escolhido. Com os Agentes de IA da IDE ou a API da Anthropic, ele sai do PC; com o Ollama, não sai.
 - **Onde ficam as investigações:** `~/.bluescreen/plugin-data/bluetego/files/investigacoes/`, uma por arquivo JSON. As exportações vão para `files/exportacoes/`, e o Explorer abre na pasta.
 - O servidor do plugin só responde no próprio PC e guarda as respostas por 10 minutos para não repetir consultas.
@@ -214,7 +217,8 @@ Aba Plugins › engrenagem do Bluetego:
 - O Querido Diário (diários oficiais municipais) ficou de fora por enquanto: a API estava fora do ar.
 - A HackerTarget (DNS reverso, subdomínios e IDs de rastreamento) deixa 50 consultas gratuitas por dia; quando acabam, a transformação avisa.
 - Outras cotas gratuitas: GreyNoise (25 consultas), Stack Exchange (300 por dia), urlscan (30 por minuto e só os últimos 30 dias), Tranco (1 por segundo).
-- Ficaram de fora por não serem confiáveis sem chave: abuse.ch (MalwareBazaar, URLhaus, ThreatFox passaram a exigir chave), ransomware.live (respondia 404 para qualquer busca), BGPView (fora do ar), archive.today (bloqueia robôs), DBLP (desafio anti-robô). Para nomes: Interpol, FBI, SEC EDGAR, TSE, STJ, Lattes, Library of Congress e CourtListener bloqueiam robôs; OpenSanctions, Portal da Transparência, OpenCorporates e Companies House exigem chave; Querido Diário estava fora do ar.
+- Ficaram de fora por não serem confiáveis sem chave: abuse.ch (MalwareBazaar, URLhaus, ThreatFox passaram a exigir chave), ransomware.live (respondia 404 para qualquer busca), BGPView (fora do ar), archive.today (bloqueia robôs), DBLP (desafio anti-robô). Para nomes: Interpol, FBI, SEC EDGAR, TSE, STJ, Lattes, Library of Congress e CourtListener bloqueiam robôs; OpenSanctions, Portal da Transparência, OpenCorporates e Companies House exigem chave; Querido Diário estava fora do ar. Para telefones: a consulta de operadora e portabilidade da ABR Telecom e o "Qual Empresa Me Ligou" têm captcha; o WhatsApp proíbe coleta automática (fica só o link); o link do Telegram não distingue número com e sem conta; Mojeek, Brave, SearXNG e Reddit bloqueiam robôs ou exigem chave.
+- **Telefone:** a operadora é a dona original da faixa de números; se o número foi portado para outra, isso não aparece. Cada consulta ao tellows aumenta o contador público de pesquisas daquele número, por isso ele não entra em máquina, só roda à mão. A busca no OpenStreetMap varre o estado inteiro do DDD e leva de 40 segundos a 1 minuto.
 - As listas de sanções são baixadas inteiras e guardadas por um dia (a da União Europeia tem 25 MB): a primeira consulta do dia demora uns 30 segundos. O GDELT (imprensa) aceita uma consulta a cada 5 segundos e bloqueia o IP por um tempo depois de várias seguidas; por isso não entra em máquina, só roda à mão.
 - Documentos no formato antigo (`.doc`, `.xls`) e PDFs criptografados não têm os metadados lidos.
 - Grafos com mais de 2.000 entidades ficam lentos para organizar; esconda tipos pela legenda ou recolha os resultados grandes.
@@ -227,6 +231,8 @@ node tests/novidades.test.mjs
 node tests/avancadas.test.mjs
 node tests/fontes.test.mjs
 node tests/nomes.test.mjs
+node tests/contatos.test.mjs
+node tests/telefones.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -236,6 +242,17 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.6.0
+
+- **Dados de contato do site:** de um domínio ou URL, os telefones, o WhatsApp, os e-mails, o CNPJ, o endereço e as redes sociais da empresa. Lê a página inicial e até 5 páginas de contato, institucionais e de privacidade linkadas nela, e os dados estruturados (schema.org) que muitos sites publicam. Posts, botões de compartilhar e e-mails de exemplo de formulário ficam de fora; site que bloqueia robôs avisa em vez de falhar.
+- A "Pegada do domínio" usa os contatos do site e consulta a razão social dos CNPJs achados.
+- **Telefone:**
+  - operadora original da faixa e cidade do fixo pelo prefixo, sem rede (numeração do libphonenumber do Google, guardada no plugin);
+  - organização com este telefone (Wikidata) e estabelecimento com este telefone no mapa (OpenStreetMap), os dois na máquina "Rastro do telefone";
+  - reputação de spam e golpe (tellows), só à mão;
+  - celular escrito no formato antigo, de 8 dígitos (51 9955-3811), vira o número de hoje (51 99955-3811), e as duas formas entram na busca na web;
+  - telefone escrito como `55…` sem o `+` ou com o `0` de discagem antes do DDD vira o mesmo número.
 
 ### 0.5.0
 

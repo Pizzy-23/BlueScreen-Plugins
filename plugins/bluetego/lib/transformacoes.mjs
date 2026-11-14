@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import tls from 'node:tls';
 import { metadados } from './metadados.mjs';
 import { procurar as procurarMaigret, sitesMaigret } from './maigret.mjs';
+import { numeracao } from './numeracao.mjs';
 import { normalizar, chave, cnpjValido, regiaoCPF, telefoneInfo, nomeReverso, extrair, apelidosDeNome, ehIP, detectar } from './entidades.mjs';
 
 export class Falha extends Error {
@@ -209,7 +210,7 @@ export function lerPagina(html, base) {
   const gerador = pega(/<meta[^>]+name=["']generator["'][^>]+content=["']([^"']{1,120})/i);
   const hrefs = [...s.matchAll(/(?:href|src)=["']([^"'#\s]+)["']/gi)].map((m) => { try { return new URL(m[1].replace(/&amp;/g, '&'), base).href; } catch { return ''; } }).filter(Boolean);
   const host = (() => { try { return new URL(base).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-  const emails = [...new Set([...s.matchAll(/mailto:([^"'?\s>]+)/gi)].map((m) => decodeURIComponent(m[1])).concat(extrair(s.replace(/<[^>]+>/g, ' ')).filter((e) => e.tipo === 'email').map((e) => e.valor)).map((e) => e.toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e) && !/\.(png|jpe?g|gif|svg|webp)$/i.test(e) && !/sentry|wixpress|example\.|@(domain|email|seudominio|yourdomain|dominio|empresa)\.com$|^(you|your|seu|nome|name|email)@/i.test(e)))];
+  const emails = [...new Set([...s.matchAll(/mailto:([^"'?\s>]+)/gi)].map((m) => decodeURIComponent(m[1])).concat(extrair(s.replace(/<[^>]+>/g, ' ')).filter((e) => e.tipo === 'email').map((e) => e.valor)).map((e) => e.toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e) && !/\.(png|jpe?g|gif|svg|webp)$/i.test(e) && !/sentry|wixpress|example\.|@(domain|email|seudominio|yourdomain|dominio|empresa)\.com$|^(you|your|seu|seuemail|meuemail|nome|name|email|exemplo|example|teste|test|fulano)@/i.test(e)))];
   const telefones = [...new Set([...s.matchAll(/href=["']tel:([^"']+)["']/gi)].map((m) => decodeURIComponent(m[1]).trim()))];
   // perfis do próprio site (o github.com lendo o github.com) e arquivos (manifest.json, ícones) não são perfis
   const doSite = (h) => { try { const x = new URL(h).hostname.replace(/^www\./, ''); return x === host || x.endsWith('.' + host); } catch { return true; } };
@@ -232,6 +233,100 @@ export async function site(ctx, dominio) {
   const h = r.headers || {};
   const props = { título: p.titulo, descrição: p.descricao, 'status HTTP': r.status, servidor: h.server || '', 'feito com': [p.gerador, h['x-powered-by']].filter(Boolean).join(', '), HSTS: h['strict-transport-security'] ? 'sim' : 'não' };
   return { ...corta(unicos(out), ctx), props };
+}
+// ---------- dados de contato do site: telefones, WhatsApp, e-mails, CNPJ, endereço e redes sociais ----------
+// lê a página inicial e as páginas de contato, institucionais e de privacidade linkadas nela (onde a empresa põe CNPJ e endereço)
+const PAGINA_CONTATO = /contato|contact|fale|atendimento|sac\b|ouvidoria|sobre|quem-somos|about|empresa|institucional|nossa-loja|lojas|endereco|localiza|privacidade|privacy|termos|terms|lgpd|politica/i;
+const LOGRADOURO = /\b(rua|r\.|avenida|av\.?|alameda|al\.|rodovia|rod\.|estrada|est\.|praça|pça\.?|travessa|tv\.|largo|via|servidão|setor|quadra|sq[ns]|shis|shin|cln|cls)\s/i;
+export function textoDaPagina(html) {
+  return String(html || '').slice(0, 2_000_000)
+    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>|<\/(p|div|li|h\d|tr|address|section|footer)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/g, '&').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&[a-z]+;/gi, ' ')
+    .replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n');
+}
+// schema.org em JSON-LD: Organization, LocalBusiness, Store… com telefone, endereço, CNPJ e perfis
+export function lerJsonLd(html) {
+  const objs = [];
+  const visita = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) return o.forEach(visita);
+    if (o.telephone || o.address || o.taxID || o.vatID || o.legalName || o.sameAs || o.contactPoint) objs.push(o);
+    for (const k of ['@graph', 'publisher', 'provider', 'author', 'brand', 'seller', 'organization', 'parentOrganization']) if (o[k]) visita(o[k]);
+  };
+  for (const m of String(html || '').matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { visita(JSON.parse(m[1].trim())); } catch {} }
+  return objs;
+}
+const textoEndereco = (a) => (typeof a === 'string' ? a : a && typeof a === 'object' ? [a.streetAddress, a.addressLocality, a.addressRegion, a.postalCode].filter((x) => typeof x === 'string' && x.trim()).join(', ') : '');
+// endereço escrito na página: a linha do CEP (e a anterior, se a rua estiver nela)
+export function enderecosNoTexto(texto) {
+  const linhas = texto.split('\n').map((l) => l.trim()).filter(Boolean);
+  const out = [];
+  linhas.forEach((l, i) => {
+    if (!/\b\d{5}-?\d{3}\b/.test(l)) return;
+    let e = l;
+    if (!LOGRADOURO.test(e) && i > 0 && LOGRADOURO.test(linhas[i - 1])) e = linhas[i - 1] + ', ' + e;
+    if (!LOGRADOURO.test(e)) return;
+    e = e.slice(Math.max(0, e.search(LOGRADOURO))).replace(/\s*[|•·]\s*/g, ' - ').replace(/\b(tel|telefone|fone|whatsapp|e-?mail|cnpj)\b[\s\S]*$/i, '').replace(/[\s,;–—-]+$/, '');
+    if (e.length >= 12 && e.length <= 220) out.push(e);
+  });
+  return [...new Set(out)];
+}
+const PERFIL_NAO = /\/(sharer|share|intent|plugins|dialog|hashtag|p|reel|reels|tv|explore|watch|embed|status|events|groups|login|signup|search)(\/|$)|\/(sharer\.php|share\.php)/i;
+const SOCIAIS_SITE = /^https?:\/\/(?:www\.|m\.|br\.|pt-br\.)?(?:(?:twitter|x|instagram|facebook|fb|pinterest|threads|kwai|vimeo|soundcloud|twitch|behance|dribbble|flickr|tumblr|reddit|spotify|discord|snapchat)\.(?:com|net|tv|gg|me)\/|linkedin\.com\/(?:company|in|school|showcase)\/|youtube\.com\/(?:@|c\/|channel\/|user\/)|tiktok\.com\/@|t\.me\/|medium\.com\/@|bsky\.app\/profile\/|threads\.net\/@)[^\s"'<>?#]+/i;
+export function contatosDaPagina(html, base) {
+  const p = lerPagina(html, base);
+  const texto = textoDaPagina(html);
+  const achados = extrair(texto, 300);
+  const hrefs = [...String(html || '').matchAll(/href=["']([^"']+)["']/gi)].map((m) => m[1].replace(/&amp;/g, '&'));
+  const whats = [...new Set(hrefs.map((h) => { const m = h.match(/(?:wa\.me\/|whatsapp\.com\/send\/?\?(?:[^"']*&)?phone=|whatsapp:\/\/send\?(?:[^"']*&)?phone=)\+?(\d{10,15})/i); return m ? '+' + m[1] : ''; }).filter(Boolean))];
+  const sociais = [...new Set(hrefs.map((h) => { try { return new URL(h, base).href; } catch { return ''; } }).filter((h) => SOCIAIS_SITE.test(h) && !PERFIL_NAO.test(new URL(h).pathname)).map((h) => h.replace(/[?#].*$/, '').replace(/\/$/, '')))];
+  const ld = lerJsonLd(html);
+  return {
+    telefones: [...new Set([...p.telefones, ...achados.filter((e) => e.tipo === 'telefone').map((e) => e.valor), ...ld.flatMap((o) => [o.telephone, ...[].concat(o.contactPoint || []).map((c) => c && c.telephone)]).filter((t) => typeof t === 'string')])],
+    whats,
+    emails: [...new Set([...p.emails, ...ld.map((o) => o.email).filter((e) => typeof e === 'string').map((e) => e.replace(/^mailto:/i, '').toLowerCase())])],
+    cnpjs: [...new Set([...achados.filter((e) => e.tipo === 'cnpj').map((e) => e.valor), ...ld.flatMap((o) => [o.taxID, o.vatID]).filter((x) => typeof x === 'string' && cnpjValido(x)).map((x) => normalizar('cnpj', x))])],
+    ceps: [...new Set(achados.filter((e) => e.tipo === 'cep').map((e) => e.valor))],
+    enderecos: [...new Set([...ld.map((o) => textoEndereco(o.address)).filter((e) => e.length >= 8), ...enderecosNoTexto(texto)])],
+    nomes: [...new Set(ld.map((o) => o.legalName).filter((n) => typeof n === 'string' && n.trim()))],
+    sociais: [...new Set([...p.sociais, ...sociais, ...ld.flatMap((o) => [].concat(o.sameAs || [])).filter((u) => typeof u === 'string' && SOCIAIS_SITE.test(u)).map((u) => u.replace(/[?#].*$/, '').replace(/\/$/, ''))])].filter((u) => { try { return !PERFIL_NAO.test(new URL(u).pathname); } catch { return false; } }),
+    links: hrefs,
+  };
+}
+export async function contatosSite(ctx, valor, tipo) {
+  const inicio = tipo === 'url' ? valor : `https://${valor}/`;
+  let r;
+  try { r = await ctx.pagina(inicio); } catch (e) { if (tipo === 'url') throw e; r = await ctx.pagina(`http://${valor}/`); }
+  if (r.status >= 400) return { entidades: [], props: { 'status HTTP': r.status }, aviso: `O site recusou a leitura (HTTP ${r.status}${r.status === 403 || r.status === 429 ? ', provável proteção contra robôs' : ''}). Abra no navegador para ver os contatos.` };
+  const base = r.url || inicio;
+  const host = new URL(base).hostname.replace(/^www\./, '');
+  const primeira = contatosDaPagina(r.texto, base);
+  // as páginas de contato do mesmo site linkadas na inicial (no máximo 5)
+  const candidatas = [...new Set(primeira.links.map((h) => { try { const u = new URL(h, base); return u.hostname.replace(/^www\./, '') === host && /^https?:$/.test(u.protocol) ? u.href.replace(/#.*$/, '') : ''; } catch { return ''; } }).filter((u) => u && u !== base && PAGINA_CONTATO.test(new URL(u).pathname) && !/\.(pdf|jpe?g|png|zip|docx?)$/i.test(u)))]
+    .sort((a, b) => Number(/contato|contact|fale|atendimento/i.test(b)) - Number(/contato|contact|fale|atendimento/i.test(a))).slice(0, 5);
+  const outras = await Promise.all(candidatas.map((u) => ctx.pagina(u).then((x) => ({ u, c: contatosDaPagina(x.texto, x.url || u) })).catch(() => null)));
+  const paginas = [{ u: base, c: primeira }, ...outras.filter(Boolean)];
+  const out = [], onde = (u) => ({ props: { página: u } });
+  const curtoU = (u) => { try { return new URL(u).pathname === '/' ? 'página inicial' : new URL(u).pathname; } catch { return u; } };
+  for (const { u, c } of paginas) {
+    for (const t of c.whats) out.push(ent('telefone', t, 'WhatsApp do site', onde(curtoU(u))));
+    for (const t of c.telefones) out.push(ent('telefone', t, 'telefone no site', onde(curtoU(u))));
+    for (const e of c.emails) out.push(ent('email', e, 'e-mail no site', onde(curtoU(u))));
+    for (const x of c.cnpjs) out.push(ent('cnpj', x, 'CNPJ no site', onde(curtoU(u))));
+    for (const e of c.enderecos) out.push(ent('local', e, 'endereço no site', onde(curtoU(u))));
+    for (const x of c.ceps) out.push(ent('cep', x, 'CEP no site'));
+    for (const n of c.nomes) out.push(ent('organizacao', n, 'razão social no site (schema.org)'));
+    for (const s of c.sociais) out.push(ent('conta', s, 'perfil do site'));
+  }
+  const ents = unicos(out.filter((e) => e.valor));
+  const conta = (t) => ents.filter((e) => e.tipo === t).length;
+  return {
+    ...corta(ents, ctx),
+    props: { 'páginas lidas': paginas.map((p) => curtoU(p.u)).join(', '), telefones: conta('telefone'), CNPJ: conta('cnpj'), endereços: conta('local'), 'redes sociais': conta('conta') },
+    aviso: ents.length ? '' : 'Nenhum dado de contato nas páginas lidas (o site pode montar o conteúdo com JavaScript).',
+  };
 }
 // Wayback Machine: endereços que o site já teve (páginas apagadas, painéis, arquivos esquecidos)
 const CURIOSOS = /\.(env|sql|bak|zip|tar|gz|rar|7z|config|conf|ini|log|xml|json|yml|yaml|old|backup|swp|key|pem|csv|xls|xlsx|docx?|pdf)(\?|$)|\/(admin|wp-admin|login|painel|api|swagger|graphql|debug|phpinfo|\.git|server-status|actuator|console|jenkins|grafana|kibana)\b/i;
@@ -553,6 +648,10 @@ export async function telefone(ctx, numero) {
   const out = [];
   if (i.estado) out.push(ent('local', i.regiao ? `${i.regiao} (${i.uf})` : `${i.estado}, Brasil`, 'região do DDD', { props: { estado: i.estado, país: 'Brasil' } }));
   else if (i.pais) out.push(ent('local', i.pais, 'país do número'));
+  // operadora original da faixa e, no fixo, a cidade pelo prefixo (libphonenumber, sem rede)
+  const nm = i.ddd ? numeracao(dig) : { operadora: '', cidade: '' };
+  if (nm.operadora) out.push(ent('organizacao', nm.operadora, 'operadora original da faixa (a portabilidade não aparece)'));
+  if (nm.cidade && / - [A-Z]{2}$/.test(nm.cidade)) out.push(ent('local', nm.cidade, i.celular ? 'cidade da faixa' : 'cidade do telefone fixo'));
   // os links abrem o perfil se o número usar o app; não dá para saber antes sem as APIs pagas
   if (n.startsWith('+') && (i.celular || !i.ddd)) {
     out.push(ent('conta', `https://wa.me/${dig}`, 'link do WhatsApp', { props: { aviso: 'abre a conversa se o número usar WhatsApp' } }));
@@ -562,7 +661,7 @@ export async function telefone(ctx, numero) {
   // as cidades que o DDD cobre (BrasilAPI); sem rede, fica só o que se sabe sem consultar
   let cidades = '';
   if (i.ddd && ctx.json) { try { const d = await ctx.json(`https://brasilapi.com.br/api/ddd/v1/${i.ddd}`, { nulo404: true }); if (d && d.cities) cidades = `${d.cities.length}: ${d.cities.slice(0, 12).map((c) => c.toLowerCase().replace(/(^|\s)\S/g, (x) => x.toUpperCase())).join(', ')}${d.cities.length > 12 ? '…' : ''}`; } catch {} }
-  return { entidades: out, props: { país: i.pais, DDI: i.ddi, DDD: i.ddd || '', tipo: i.tipo || '', região: i.regiao || '', 'cidades do DDD': cidades, 'jeitos de escrever': (i.formatos || []).slice(1).join(' · ') } };
+  return { entidades: out, props: { país: i.pais, DDI: i.ddi, DDD: i.ddd || '', tipo: i.tipo || '', região: i.regiao || '', 'cidades do DDD': cidades, 'jeitos de escrever': (i.formatos || []).slice(1).join(' · '), 'operadora original': nm.operadora ? `${nm.operadora} (sem contar a portabilidade)` : '', 'formato antigo': i.antigo ? `${i.antigo} (antes do nono dígito)` : '' } };
 }
 export async function cve(ctx, id) {
   const d = await ctx.json(`https://cveawg.mitre.org/api/cve/${encodeURIComponent(id)}`, { nulo404: true });
@@ -1789,6 +1888,73 @@ export async function imprensa(ctx, nome) {
   return { entidades: out, props: { 'menções na imprensa (últimos 3 meses)': arts.length ? `${arts.length}${arts.length >= 20 ? '+' : ''}` : 0, 'veículos': Object.keys(veiculos).slice(0, 6).join(', ') }, aviso: arts.length ? '' : 'Nenhuma menção na imprensa nos últimos 3 meses (GDELT).' };
 }
 
+// ---------- telefone: quem publica este número (Wikidata e OpenStreetMap) e a reputação de spam (tellows) ----------
+// os 8 últimos dígitos com separador opcional entre eles (os formatos gravados variam: "+55 (14) 3491-2202", "+55-014-3491-2202")
+const finalFlex = (d8) => d8.split('').join('[^0-9]?');
+const dddDoNumero = (achado, ddd) => { const d = String(achado).replace(/\D/g, '').replace(/^55/, '').replace(/^0/, ''); return d.startsWith(String(ddd)); };
+export async function telefoneWikidata(ctx, numero) {
+  const i = telefoneInfo(numero);
+  if (!i || !i.ddd) return { entidades: [], aviso: 'Só para números do Brasil com DDD.' };
+  const d8 = normalizar('telefone', numero).replace(/\D/g, '').slice(-8);
+  const q = `SELECT ?i ?iLabel ?t ?site WHERE { ?i wdt:P1329 ?t . FILTER(STRSTARTS(?t, "+55") && REGEX(?t, "${finalFlex(d8)}$")) OPTIONAL { ?i wdt:P856 ?site } SERVICE wikibase:label { bd:serviceParam wikibase:language "pt,en". } } LIMIT 20`;
+  const r = await ctx.json(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(q)}`, { timeout: 60000, headers: { accept: 'application/sparql-results+json' } });
+  const linhas = (((r || {}).results || {}).bindings || []).filter((b) => dddDoNumero(b.t.value, i.ddd));
+  const out = [];
+  for (const b of linhas) {
+    out.push(ent('organizacao', b.iLabel.value, 'tem este telefone (Wikidata)', { props: { wikidata: b.i.value, 'telefone no Wikidata': b.t.value } }));
+    if (b.site) out.push(ent('url', b.site.value, 'site oficial', { de: { tipo: 'organizacao', valor: b.iLabel.value } }));
+  }
+  return { entidades: unicos(out), aviso: linhas.length ? '' : 'Nenhuma organização do Wikidata tem este telefone.' };
+}
+export async function telefoneOsm(ctx, numero) {
+  const i = telefoneInfo(numero);
+  if (!i || !i.ddd) return { entidades: [], aviso: 'Só para números do Brasil com DDD.' };
+  const d8 = normalizar('telefone', numero).replace(/\D/g, '').slice(-8);
+  // o celular pode estar gravado com ou sem o nono dígito; a regex do Overpass é POSIX (sem \D)
+  const re = `${i.ddd}[^0-9]{0,3}${i.celular ? '9?[^0-9]?' : ''}${finalFlex(d8)}`;
+  const q = `[out:json][timeout:150];area["ISO3166-2"="BR-${i.uf}"]->.a;nwr(area.a)[~"^(phone|contact:phone|contact:mobile|mobile|contact:whatsapp|fax)$"~"${re}"];out tags center 10;`;
+  let r = null;
+  for (const srv of ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter']) {
+    try { r = await ctx.json(`${srv}?data=${encodeURIComponent(q)}`, { timeout: 170000 }); break; } catch {}
+  }
+  if (!r) throw new Falha('Os servidores do OpenStreetMap (Overpass) estão ocupados; tente de novo mais tarde.', { status: 502 });
+  const els = (r.elements || []).filter((e) => e.tags && e.tags.name);
+  const out = [];
+  for (const e of els) {
+    const t = e.tags, nome = t.name;
+    out.push(ent('organizacao', nome, 'estabelecimento com este telefone (OpenStreetMap)', { props: { tipo: t.amenity || t.shop || t.office || t.tourism || t.craft || t.healthcare || '', cidade: t['addr:city'] || '', mapa: `https://www.openstreetmap.org/${e.type}/${e.id}` } }));
+    const rua = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(', ');
+    const c = e.center || (e.lat != null ? { lat: e.lat, lon: e.lon } : null);
+    if (rua || c) out.push(ent('local', rua ? [rua, t['addr:city'], t['addr:postcode']].filter(Boolean).join(' - ') : `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`, 'endereço no mapa', { de: { tipo: 'organizacao', valor: nome }, props: c ? { coordenadas: `${c.lat}, ${c.lon}` } : {} }));
+    for (const k of ['website', 'contact:website']) if (t[k]) out.push(ent('url', t[k], 'site', { de: { tipo: 'organizacao', valor: nome } }));
+    for (const k of ['email', 'contact:email']) if (t[k]) out.push(ent('email', t[k], 'e-mail no mapa', { de: { tipo: 'organizacao', valor: nome } }));
+    for (const k of ['contact:instagram', 'contact:facebook']) if (t[k] && /^https?:/.test(t[k])) out.push(ent('conta', t[k], 'perfil no mapa', { de: { tipo: 'organizacao', valor: nome } }));
+  }
+  return { entidades: unicos(out), aviso: els.length ? '' : `Nenhum estabelecimento do OpenStreetMap em ${i.uf} tem este telefone.` };
+}
+// tellows: só a nota, a quantidade de avaliações e a categoria; os comentários são texto livre e ficam de fora
+export async function tellows(ctx, numero) {
+  const i = telefoneInfo(numero);
+  if (!i || i.ddi !== '+55') return { entidades: [], aviso: 'Só para números do Brasil.' };
+  const n = normalizar('telefone', numero), local = n.startsWith('+55') ? n.slice(3) : n;
+  const r = await ctx.pagina(`https://www.tellows.com.br/num/${local}`);
+  const url = `https://www.tellows.com.br/num/${local}`;
+  let nota = null;
+  for (const m of String(r.texto).matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try { const j = JSON.parse(m[1]); const a = [].concat(j).find((x) => x && x['@type'] === 'AggregateRating') || (j && j.aggregateRating); if (a) nota = a; } catch {}
+  }
+  const pesquisas = (String(r.texto).match(/Pesquisas:\s*<?[^0-9]{0,40}?([\d.]+)/i) || [])[1] || '';
+  if (!nota) return { entidades: [ent('url', url, 'página no tellows')], props: { tellows: 'sem avaliações', 'pesquisas no tellows': pesquisas } };
+  const desc = (nota.itemReviewed && nota.itemReviewed.description) || '';
+  const categoria = (desc.match(/marcado como (.+?) \d+ vez/) || [])[1] || '';
+  const score = Number(nota.ratingValue);
+  return {
+    entidades: [ent('url', url, 'avaliações de spam (tellows)', { props: { nota: `${score} de 9`, avaliações: nota.ratingCount, categoria } })],
+    alerta: score >= 7,
+    props: { tellows: `nota ${score} de 9 (1 confiável, 9 perigoso) em ${nota.ratingCount} avaliações`, categoria, 'pesquisas no tellows': pesquisas, risco: score >= 7 ? 'muitas pessoas marcaram este número como indesejado ou golpe' : '' },
+  };
+}
+
 // ---------- VirusTotal (opcional: chave no Cofre) ----------
 const VT = 'https://www.virustotal.com/api/v3/';
 async function vt(ctx, caminho) {
@@ -1836,6 +2002,7 @@ export const TRANSFORMACOES = [
   { id: 'documentos', de: ['dominio'], nome: 'Documentos públicos e metadados (autores, usuários)', fonte: 'o próprio site + Wayback', run: documentos },
   { id: 'rastreadores', de: ['dominio'], nome: 'IDs de rastreamento (Analytics, AdSense, Pixel)', fonte: 'o próprio site', rapida: true, run: rastreadores },
   { id: 'site', de: ['dominio'], nome: 'Ler o site (e-mails, perfis, links)', fonte: 'o próprio site', run: site },
+  { id: 'contatos-site', de: ['dominio', 'url'], nome: 'Dados de contato do site: telefones, WhatsApp, CNPJ, endereço, redes sociais', fonte: 'o próprio site (inicial e páginas de contato)', run: contatosSite },
   { id: 'wayback', de: ['dominio'], nome: 'Endereços arquivados', fonte: 'Wayback Machine', run: wayback },
   { id: 'tecnologias', de: ['dominio'], nome: 'Tecnologias do site', fonte: 'o próprio site', rapida: true, run: tecnologias },
   { id: 'certificado', de: ['dominio'], nome: 'Certificado TLS (validade, outros nomes)', fonte: 'o próprio site', rapida: true, run: certificado },
@@ -1892,7 +2059,10 @@ export const TRANSFORMACOES = [
   { id: 'github-repos', de: ['apelido'], nome: 'Repositórios, linguagens e organizações', fonte: 'GitHub', run: githubRepos },
   { id: 'orcid-perfil', de: ['conta'], so: /orcid\.org\//, soAviso: 'Só serve para contas do ORCID.', nome: 'Perfil completo do ORCID (empregos, sites, e-mails)', fonte: 'ORCID', run: orcidPerfil },
   { id: 'conta-apelido', de: ['conta'], nome: 'Nome de usuário da conta', fonte: 'local', rapida: true, run: contaApelido },
-  { id: 'telefone', de: ['telefone'], nome: 'Tipo, região, cidades do DDD e apps de mensagem', fonte: 'local + BrasilAPI', rapida: true, run: telefone },
+  { id: 'telefone-wikidata', de: ['telefone'], nome: 'Organização com este telefone', fonte: 'Wikidata', run: telefoneWikidata },
+  { id: 'telefone-osm', de: ['telefone'], nome: 'Estabelecimento com este telefone (lento: até 1 minuto)', fonte: 'OpenStreetMap (Overpass)', run: telefoneOsm },
+  { id: 'tellows', de: ['telefone'], nome: 'Reputação de spam e golpe', fonte: 'tellows', run: tellows },
+  { id: 'telefone', de: ['telefone'], nome: 'Tipo, operadora original, região, cidades do DDD e apps de mensagem', fonte: 'local + BrasilAPI', rapida: true, run: telefone },
   { id: 'web', de: ['telefone', 'email', 'apelido', 'pessoa', 'cnpj', 'organizacao', 'dominio', 'cripto', 'hash'], nome: 'Procurar na web', fonte: 'DuckDuckGo (Bing de reserva)', run: web },
   { id: 'wikidata', de: ['organizacao'], nome: 'Site oficial, sede, donos e fundadores', fonte: 'Wikidata', rapida: true, run: wikidata },
   { id: 'cnpj', de: ['cnpj'], nome: 'Razão social, sócios, endereço, regime e matriz', fonte: 'Receita (BrasilAPI ou Minha Receita)', rapida: true, run: cnpj },
