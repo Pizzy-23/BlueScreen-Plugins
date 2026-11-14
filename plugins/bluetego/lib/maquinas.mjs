@@ -39,8 +39,8 @@ export const MAQUINAS = [
   },
   {
     id: 'pessoa', de: 'pessoa', nome: 'Pegada da pessoa',
-    descricao: 'Quantas pessoas têm o nome (IBGE), Wikidata, Câmara dos Deputados, ORCID e OpenAlex, chaves PGP, Launchpad, Bluesky, fediverso, Stack Overflow, Wikipédia, contas do GitHub com o nome, a web, e os apelidos prováveis com as contas que existem para eles.',
-    passos: [{ t: 'ibge-nome' }, { t: 'pessoa-wikidata' }, { t: 'deputado' }, { t: 'orcid' }, { t: 'openalex' }, { t: 'orcid-perfil', max: 3 }, { t: 'pgp-nome' }, { t: 'launchpad', tipos: ['pessoa'] }, { t: 'bluesky-busca' }, { t: 'fediverso', tipos: ['pessoa'] }, { t: 'stackexchange', tipos: ['pessoa'] }, { t: 'wikipedia', tipos: ['pessoa'] }, { t: 'github-nome' }, { t: 'web', tipos: ['pessoa'] }, { t: 'nome-apelidos' }, { t: 'contas', max: 10 }, { t: 'github', max: 5 }, { t: 'gravatar', max: 10 }],
+    descricao: 'Quantas pessoas têm o nome (IBGE), Wikidata, mandatos na Câmara e no Senado, sanções (OFAC, ONU, UE), TCU, processos no STF, Diário Oficial da União, Offshore Leaks, livros, Nobel, ORCID e OpenAlex, chaves PGP, Launchpad, Bluesky, fediverso, Stack Overflow, Wikipédia, contas do GitHub com o nome, a web, e os apelidos prováveis com as contas que existem para eles.',
+    passos: [{ t: 'ibge-nome' }, { t: 'pessoa-wikidata' }, { t: 'parlamentar', max: 2 }, { t: 'sancoes', tipos: ['pessoa'], max: 8 }, { t: 'tcu', max: 8 }, { t: 'stf', max: 3 }, { t: 'dou', max: 3 }, { t: 'offshore', max: 3 }, { t: 'autor', max: 2 }, { t: 'nobel', max: 1 }, { t: 'orcid' }, { t: 'openalex' }, { t: 'orcid-perfil', max: 3 }, { t: 'pgp-nome' }, { t: 'launchpad', tipos: ['pessoa'] }, { t: 'bluesky-busca' }, { t: 'fediverso', tipos: ['pessoa'] }, { t: 'stackexchange', tipos: ['pessoa'] }, { t: 'wikipedia', tipos: ['pessoa'] }, { t: 'github-nome' }, { t: 'web', tipos: ['pessoa'] }, { t: 'nome-apelidos' }, { t: 'contas', max: 10 }, { t: 'github', max: 5 }, { t: 'gravatar', max: 10 }],
   },
   {
     id: 'golpes-marca', de: 'dominio', nome: 'Golpes com a marca',

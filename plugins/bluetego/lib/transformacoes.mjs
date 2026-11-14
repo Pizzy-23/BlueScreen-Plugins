@@ -1410,17 +1410,6 @@ export async function nomeIbge(ctx, nome) {
   const ufs = (porUf || []).map((x) => ({ uf: x.localidade, prop: (x.res[0] || {}).proporcao || 0 })).sort((a, b) => b.prop - a.prop).slice(0, 3);
   return { entidades: [], props: { [`pessoas chamadas ${pri} no Brasil`]: total.toLocaleString('pt-BR'), 'década mais comum de nascimento': pico.periodo.replace(/[[\]]/g, '').replace(',', '–'), 'risco de homônimo': total > 100000 ? 'alto' : total > 5000 ? 'médio' : 'baixo', 'estados onde é mais comum (código IBGE)': ufs.map((x) => x.uf).join(', ') } };
 }
-export async function deputado(ctx, nome) {
-  const d = await ctx.json(`https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nome)}&ordem=ASC&ordenarPor=nome`);
-  const deps = (d && d.dados) || [];
-  const out = [];
-  for (const x of deps.slice(0, 5)) {
-    out.push(ent('organizacao', `Câmara dos Deputados`, `deputado(a) federal (${x.siglaPartido}-${x.siglaUf})`, { props: { 'nome parlamentar': x.nome, partido: x.siglaPartido, UF: x.siglaUf } }));
-    if (x.email) out.push(ent('email', x.email, 'e-mail do gabinete'));
-    if (x.siglaPartido) out.push(ent('organizacao', x.siglaPartido, 'partido'));
-  }
-  return { entidades: unicos(out), props: deps[0] ? { 'mandato atual': `${deps[0].nome} (${deps[0].siglaPartido}-${deps[0].siglaUf})`, perfil: `https://www.camara.leg.br/deputados/${deps[0].id}` } : {}, aviso: deps.length ? '' : 'Não é deputado(a) federal na legislatura atual.' };
-}
 
 // ---------- listas baixadas inteiras (CISA KEV, Spamhaus DROP, saídas do Tor): guardadas na memória por horas ----------
 const LISTAS = new Map();
@@ -1600,6 +1589,206 @@ export async function peeringdb(ctx, asn) {
   return { entidades: unicos(out), props: { 'também conhecido como': x.aka || '', 'pontos de troca (IX)': x.ix_count, 'data centers': x.fac_count, 'tipo de rede': x.info_type || '', 'tráfego': x.info_traffic || '', 'AS-SET': x.irr_as_set || '', PeeringDB: `https://www.peeringdb.com/net/${x.id}` } };
 }
 
+// ---------- nomes completos: conferência pelas palavras do nome (em qualquer ordem, sem acento) ----------
+const PALAVRAS_FRACAS = new Set(['da', 'de', 'do', 'das', 'dos', 'e', 'del', 'la', 'van', 'von', 'di', 'du', 'le']);
+export const palavrasNome = (s) => semAcento_(s).replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((p) => p.length > 1 && !PALAVRAS_FRACAS.has(p));
+// todas as palavras do nome procurado aparecem no nome achado ("MADURO MOROS, Nicolas" casa com "Nicolas Maduro")
+export const nomeCasa = (procurado, achado) => { const a = new Set(palavrasNome(achado)); const p = palavrasNome(procurado); return p.length >= 2 && p.every((x) => a.has(x)); };
+const exigeNomeCompleto = (nome) => (palavrasNome(nome).length < 2 ? { entidades: [], aviso: 'Use o nome completo (pelo menos nome e sobrenome).' } : null);
+// lista grande (sanções): baixada como arquivo, guardada por um dia
+async function listaGrande(ctx, url, horas, ler) {
+  const x = LISTAS.get(url);
+  if (x && Date.now() - x.em < horas * 3600000) return x.v;
+  const b = await ctx.binario(url, { max: 40_000_000, timeout: 120000 });
+  if (!b || !b.dados) throw new Falha(`Não deu para baixar a lista ${new URL(url).host}${b && b.status ? ` (${b.status})` : ''}.`, { status: 502 });
+  const v = ler(b.dados.toString('utf8'));
+  LISTAS.set(url, { em: Date.now(), v });
+  return v;
+}
+// CSV com aspas (o da OFAC e o da UE)
+export function lerCsv(texto, sep = ',') {
+  const linhas = [];
+  let campo = '', linha = [], aspas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (aspas) { if (c === '"') { if (texto[i + 1] === '"') { campo += '"'; i++; } else aspas = false; } else campo += c; continue; }
+    if (c === '"') aspas = true;
+    else if (c === sep) { linha.push(campo); campo = ''; }
+    else if (c === '\n') { linha.push(campo.replace(/\r$/, '')); linhas.push(linha); linha = []; campo = ''; }
+    else campo += c;
+  }
+  if (campo || linha.length) { linha.push(campo); linhas.push(linha); }
+  return linhas;
+}
+
+// ---------- STF: processos em que o nome é parte ----------
+export async function stf(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const pega = (tram) => ctx.json(`https://digital.stf.jus.br/integracoes-processos/api/public/partes/processos?nome=${encodeURIComponent(nome)}&processosPorPagina=20&pagina=1&processosEmTramitacao=${tram}&tipoPesquisa=PARTE`).catch(() => null);
+  const [ativos, antigos] = await Promise.all([pega('sim'), pega('nao')]);
+  // só a parte com exatamente as palavras do nome (o STF acha trechos)
+  const partes = [...((ativos && ativos.partes) || []), ...((antigos && antigos.partes) || [])].filter((p) => nomeCasa(nome, p.pessoaNome) && nomeCasa(p.pessoaNome, nome));
+  const out = partes.slice(0, 25).map((p) => ent('url', `https://portal.stf.jus.br/processos/detalhe.asp?incidente=${p.processoId}`, 'parte em processo no STF (pode ser homônimo)', { rotulo: `STF · ${p.processoIdentificacao}`, props: { processo: p.processoIdentificacao, 'número único': p.processoNumeroUnico || '', autuado: p.processoDataAutuacao || '', 'em tramitação': p.processoEmTramitacao || '', 'nome no processo': p.pessoaNome } }));
+  return { entidades: unicos(out), props: { 'processos no STF': `${partes.length}${partes.length ? ` (${partes.filter((p) => p.processoEmTramitacao === 'Sim').length} em tramitação)` : ''}` }, aviso: partes.length ? '' : 'Nenhum processo no STF com este nome como parte.' };
+}
+
+// ---------- Diário Oficial da União: nomeações, exonerações, punições, contratos ----------
+export async function dou(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const r = await ctx.pagina(`https://www.in.gov.br/consulta/-/buscar/dou?q=${encodeURIComponent('"' + nome + '"')}&s=todos&exactDate=all&sortType=0`, { navegador: false, timeout: 40000 });
+  const bloco = (String(r.texto).match(/<script[^>]+id="_br_com_seatecnologia_in_buscadou_BuscaDouPortlet_params"[^>]*>([\s\S]*?)<\/script>/) || [])[1];
+  let lista_ = [];
+  try { lista_ = (JSON.parse(bloco).jsonArray || []); } catch {}
+  const out = lista_.slice(0, Math.max(5, Math.min(30, Number(ctx.limite) || 20))).map((a) => ent('url', `https://www.in.gov.br/web/dou/-/${a.urlTitle}`, 'citado no Diário Oficial da União', { rotulo: `DOU ${a.pubDate} · ${curtoT(a.title || a.artType || '', 40)}`, props: { ato: a.artType || '', data: a.pubDate || '', seção: a.pubName || '', órgão: String(a.hierarchyStr || '').split('/').slice(0, 3).join(' / '), trecho: tira(a.content || '').slice(0, 300) } }));
+  // os órgãos que mais publicam sobre o nome viram organizações
+  const orgaos = {};
+  for (const a of lista_) { const o = String(a.hierarchyStr || '').split('/').filter(Boolean)[1]; if (o) orgaos[o] = (orgaos[o] || 0) + 1; }
+  for (const [o, q] of Object.entries(orgaos).sort((a, b) => b[1] - a[1]).slice(0, 4)) out.push(ent('organizacao', o, 'órgão que publica atos com o nome', { props: { atos: q } }));
+  return { entidades: unicos(out), props: { 'atos no Diário Oficial da União': lista_.length ? `${lista_.length}${lista_.length >= 20 ? '+' : ''}` : 0, atenção: lista_.length ? 'o nome pode aparecer só citado (num gabinete, numa lista): leia o trecho' : '' }, aviso: lista_.length ? '' : 'Nenhum ato do Diário Oficial da União cita este nome.' };
+}
+
+// ---------- TCU: inabilitados para cargo público e proibidos de licitar ----------
+// as listas trazem o CPF completo: o Bluetego descarta esse campo (não cria nem mostra CPF)
+export async function tcu(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const q = encodeURIComponent(JSON.stringify({ nome: { $like: `%${semAcento_(nome).toUpperCase()}%` } }));
+  const [inab, inid] = await Promise.all(['inabilitados', 'inidoneos'].map((l) => ctx.json(`https://contas.tcu.gov.br/ords/condenacao/consulta/${l}?q=${q}`).then((d) => ((d && d.items) || []).map((x) => ({ ...x, lista: l }))).catch(() => [])));
+  const hits = [...inab, ...inid].filter((x) => nomeCasa(nome, x.nome));
+  const out = [];
+  for (const x of hits.slice(0, 10)) {
+    out.push(ent('organizacao', 'Tribunal de Contas da União', x.lista === 'inabilitados' ? 'inabilitado(a) para cargo público pelo TCU' : 'proibido(a) de licitar pelo TCU (inidôneo)', { alerta: true, props: { processo: x.processo || '', acórdão: x.deliberacao || '', desde: data(x.data_transito_julgado), até: data(x.data_final), local: [x.municipio, x.uf].filter(Boolean).join(' - ') } }));
+    if (x.municipio) out.push(ent('local', `${x.municipio} - ${x.uf}`, 'município na condenação do TCU'));
+  }
+  return { entidades: unicos(out), alerta: hits.length > 0, props: { TCU: hits.length ? hits.map((x) => `${x.lista === 'inabilitados' ? 'inabilitado' : 'inidôneo'} até ${data(x.data_final)} (${x.deliberacao})`).join('; ') : 'nada consta', risco: hits.length ? 'condenação no TCU: confira município e processo para descartar homônimo' : '' } };
+}
+
+// ---------- parlamentares: Câmara (todas as legislaturas) e Senado (desde 1946) ----------
+export async function parlamentar(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const out = [], props = {};
+  // Câmara: o nome casa por trecho; só ficam os mandatos de quem tem todas as palavras do nome
+  const legs = Array.from({ length: 57 }, (_, i) => `idLegislatura=${i + 1}`).join('&');
+  // o nome inteiro e cada palavra (o parlamentar pode ter usado só parte do nome: "FERNANDO COLLOR")
+  const buscas = [nome, ...palavrasNome(nome)].slice(0, 5);
+  const cams = await Promise.all(buscas.map((q) => ctx.json(`https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(q)}&${legs}&itens=100`, { timeout: 40000 }).catch(() => null)));
+  const vistos = new Set();
+  const mandatos = cams.flatMap((c) => (c && c.dados) || []).filter((x) => (nomeCasa(nome, x.nome) || nomeCasa(x.nome, nome)) && !vistos.has(x.id + '|' + x.idLegislatura) && vistos.add(x.id + '|' + x.idLegislatura));
+  const ids = [...new Set(mandatos.map((x) => x.id))].slice(0, 3);
+  for (const id of ids) {
+    const [det, ocup] = await Promise.all([ctx.json(`https://dadosabertos.camara.leg.br/api/v2/deputados/${id}`).catch(() => null), ctx.json(`https://dadosabertos.camara.leg.br/api/v2/deputados/${id}/ocupacoes`).catch(() => null)]);
+    const d = (det && det.dados) || {};
+    if (d.nomeCivil && !nomeCasa(nome, d.nomeCivil) && !nomeCasa(d.nomeCivil, nome)) continue;
+    const ms = mandatos.filter((x) => x.id === id);
+    out.push(ent('organizacao', 'Câmara dos Deputados', `deputado(a) federal em ${ms.length} ${ms.length === 1 ? 'legislatura' : 'legislaturas'}`, { props: { 'nome civil': d.nomeCivil || '', partidos: [...new Set(ms.map((x) => x.siglaPartido))].join(', '), UF: [...new Set(ms.map((x) => x.siglaUf))].join(', '), legislaturas: ms.map((x) => x.idLegislatura).join(', '), perfil: `https://www.camara.leg.br/deputados/${id}` } }));
+    for (const p of new Set(ms.map((x) => x.siglaPartido).filter(Boolean))) out.push(ent('organizacao', p, 'partido (Câmara)'));
+    if (d.municipioNascimento) out.push(ent('local', `${d.municipioNascimento} - ${d.ufNascimento}`, 'nasceu em'));
+    if (d.dataNascimento) props.nascimento = d.dataNascimento;
+    if (d.escolaridade) props.escolaridade = d.escolaridade;
+    if (d.ultimoStatus && d.ultimoStatus.email) out.push(ent('email', d.ultimoStatus.email, 'e-mail do gabinete'));
+    for (const o of ((ocup && ocup.dados) || []).slice(0, 10)) if (o.entidade) out.push(ent('organizacao', o.entidade, o.titulo ? `ocupação declarada: ${o.titulo}` : 'ocupação declarada', { props: { de: o.anoInicio || '', até: o.anoFim || '', UF: o.entidadeUF || '' } }));
+  }
+  // Senado: a lista inteira desde 1946 (não há busca por nome), filtrada aqui
+  try {
+    const sen = await listaGrande(ctx, 'https://legis.senado.leg.br/dadosabertos/senador/lista/legislatura/38/57.json', 24, (t) => {
+      const j = JSON.parse(t);
+      const lista_ = ((((j.ListaParlamentarLegislatura || {}).Parlamentares || {}).Parlamentar) || []);
+      return Array.isArray(lista_) ? lista_ : [lista_];
+    });
+    const achados = sen.filter((p) => { const i = p.IdentificacaoParlamentar || {}; return nomeCasa(nome, i.NomeCompletoParlamentar || '') || nomeCasa(nome, i.NomeParlamentar || ''); }).slice(0, 3);
+    for (const p of achados) {
+      const i = p.IdentificacaoParlamentar, cod = i.CodigoParlamentar;
+      const ms = [].concat((p.Mandatos && p.Mandatos.Mandato) || []);
+      out.push(ent('organizacao', 'Senado Federal', `senador(a) em ${ms.length} ${ms.length === 1 ? 'mandato' : 'mandatos'}`, { props: { 'nome completo': i.NomeCompletoParlamentar || '', partido: i.SiglaPartidoParlamentar || '', UF: [...new Set(ms.map((m) => m.UfParlamentar).filter(Boolean))].join(', '), perfil: i.UrlPaginaParlamentar || `https://www25.senado.leg.br/web/senadores/senador/-/perfil/${cod}` } }));
+      for (const m of ms) for (const s of [].concat((m.Suplentes && m.Suplentes.Suplente) || [])) if (s.NomeParlamentar) out.push(ent('pessoa', s.NomeParlamentar, `${(s.DescricaoParticipacao || 'suplente').toLowerCase()} no Senado`));
+      const cargos = await ctx.json(`https://legis.senado.leg.br/dadosabertos/senador/${cod}/cargos.json`).catch(() => null);
+      const lista_ = [].concat(((((cargos || {}).CargoParlamentar || {}).Parlamentar || {}).Cargos || {}).Cargo || []);
+      for (const c of lista_.slice(0, 8)) if (c.IdentificacaoComissao && c.IdentificacaoComissao.NomeComissao) out.push(ent('organizacao', c.IdentificacaoComissao.NomeComissao, `${String(c.DescricaoCargo || 'membro').toLowerCase()} (Senado)`, { props: { desde: data(c.DataInicio), até: data(c.DataFim) || 'atual' } }));
+    }
+  } catch { props.Senado = 'lista fora do ar'; }
+  const achou = out.some((e) => /Câmara dos Deputados|Senado Federal/.test(e.valor));
+  return { entidades: unicos(out), props, aviso: achou ? '' : 'Não foi deputado(a) federal nem senador(a).' };
+}
+
+// ---------- sanções: OFAC (EUA), ONU e União Europeia ----------
+export async function sancoes(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const props = {}, out = [], achados = [];
+  const tarefas = [
+    ['OFAC (EUA)', async () => {
+      const linhas = await listaGrande(ctx, 'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV', 24, (t) => lerCsv(t).filter((l) => l.length > 3));
+      for (const l of linhas) if (nomeCasa(nome, l[1])) achados.push({ fonte: 'OFAC (EUA)', nome: l[1], programa: l[3], cargo: l[4] === '-0-' ? '' : l[4], obs: (l[11] || '').slice(0, 300) });
+    }],
+    ['ONU', async () => {
+      const ind = await listaGrande(ctx, 'https://scsanctions.un.org/resources/xml/en/consolidated.xml', 24, (t) => t.split('<INDIVIDUAL>').slice(1).map((b) => b.split('</INDIVIDUAL>')[0]));
+      const tag = (b, t) => tira((b.match(new RegExp(`<${t}>([\\s\\S]*?)</${t}>`)) || [])[1] || '');
+      for (const b of ind) {
+        const nomes = [[tag(b, 'FIRST_NAME'), tag(b, 'SECOND_NAME'), tag(b, 'THIRD_NAME'), tag(b, 'FOURTH_NAME')].filter(Boolean).join(' '), ...[...b.matchAll(/<ALIAS_NAME>([^<]+)<\/ALIAS_NAME>/g)].map((m) => m[1])];
+        const n = nomes.find((x) => nomeCasa(nome, x));
+        if (n) achados.push({ fonte: 'ONU', nome: nomes[0], programa: `${tag(b, 'UN_LIST_TYPE')} ${tag(b, 'REFERENCE_NUMBER')}`, cargo: tag(b, 'DESIGNATION'), obs: `incluído em ${tag(b, 'LISTED_ON')}; nacionalidade ${tag(b, 'NATIONALITY')}`, link: tag(b, 'INTERPOL_LINK') });
+      }
+    }],
+    ['União Europeia', async () => {
+      const linhas = await listaGrande(ctx, 'https://webgate.ec.europa.eu/fsd/fsf/public/files/csvFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw', 24, (t) => {
+        const ls = lerCsv(t, ';'), cab = ls[0] || [];
+        const c = (n) => cab.indexOf(n);
+        return ls.slice(1).map((l) => ({ nome: l[c('NameAlias_WholeName')], funcao: l[c('NameAlias_Function')], programa: l[c('Entity_Regulation_Programme')], url: l[c('Entity_Regulation_PublicationUrl')], tipo: l[c('Entity_SubjectType')] })).filter((x) => x.nome && x.tipo === 'P');
+      });
+      const vistos = new Set();
+      for (const x of linhas) if (nomeCasa(nome, x.nome) && !vistos.has(x.nome)) { vistos.add(x.nome); achados.push({ fonte: 'União Europeia', nome: x.nome, programa: x.programa, cargo: x.funcao, link: x.url }); }
+    }],
+  ];
+  await Promise.all(tarefas.map(([f, fn]) => fn().catch(() => { props[f] = 'lista fora do ar'; })));
+  for (const a of achados.slice(0, 12)) out.push(ent('organizacao', a.fonte === 'OFAC (EUA)' ? 'OFAC (Tesouro dos EUA)' : a.fonte === 'ONU' ? 'Conselho de Segurança da ONU' : 'União Europeia', `sancionado(a): ${a.programa || 'lista de sanções'}`, { alerta: true, props: { 'nome na lista': a.nome, cargo: a.cargo || '', observações: a.obs || '', link: a.link || '' } }));
+  for (const f of ['OFAC (EUA)', 'ONU', 'União Europeia']) if (!props[f]) props[f] = achados.some((a) => a.fonte === f) ? 'consta' : 'não consta';
+  if (achados.length) props.risco = 'nome em lista de sanções: confira data de nascimento e nacionalidade nas observações para descartar homônimo';
+  return { entidades: unicos(out), alerta: achados.length > 0, props };
+}
+
+// ---------- ICIJ Offshore Leaks: dirigentes e acionistas de offshores nos vazamentos ----------
+export async function offshore(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const r = await ctx.post('https://offshoreleaks.icij.org/api/v1/reconcile', { queries: { q0: { query: nome, type: 'https://offshoreleaks.icij.org/schema/oldb/officer', limit: 15 } } });
+  // a API sempre devolve alguém: só vale quem tem todas as palavras do nome
+  const res = (((r || {}).q0 || {}).result || []).filter((x) => nomeCasa(nome, x.name));
+  const out = res.slice(0, 8).map((x) => ent('url', `https://offshoreleaks.icij.org/nodes/${x.id}`, 'possível menção no Offshore Leaks (ICIJ)', { rotulo: `ICIJ · ${x.name}`, props: { 'nome no vazamento': x.name, origem: x.description || '', atenção: 'sem data de nascimento: pode ser homônimo', fonte: 'ICIJ Offshore Leaks (cite a fonte)' } }));
+  return { entidades: out, props: { 'Offshore Leaks': res.length ? `${res.length} possíveis menções` : 'nenhuma' } };
+}
+
+// ---------- autor: bibliotecas nacionais (VIAF) e livros (Open Library), e o Prêmio Nobel ----------
+export async function autor(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const [viaf, ol] = await Promise.all([ctx.json(`https://viaf.org/viaf/AutoSuggest?query=${encodeURIComponent(nome)}`).catch(() => null), ctx.json(`https://openlibrary.org/search/authors.json?q=${encodeURIComponent(nome)}&limit=5`).catch(() => null)]);
+  const out = [], props = {};
+  const v = ((viaf && viaf.result) || []).filter((x) => x.nametype === 'personal' && nomeCasa(nome, x.term))[0];
+  if (v) { out.push(ent('url', `https://viaf.org/viaf/${v.viafid}`, 'registro nas bibliotecas nacionais (VIAF)', { rotulo: `VIAF · ${v.term}` })); props['bibliotecas que registram'] = ['lc', 'dnb', 'bnf', 'ptbnp', 'bne', 'iccu', 'selibr'].filter((k) => v[k]).map((k) => k.toUpperCase()).join(', '); props['no VIAF'] = v.term; }
+  for (const a of ((ol && ol.docs) || []).filter((x) => nomeCasa(nome, x.name) && x.work_count > 0).slice(0, 2)) {
+    out.push(ent('url', `https://openlibrary.org/authors/${a.key}`, 'autor(a) na Open Library', { rotulo: `Open Library · ${a.name}`, props: { obras: a.work_count, 'obra principal': a.top_work || '', nascimento: a.birth_date || '', assuntos: (a.top_subjects || []).slice(0, 5).join(', ') } }));
+  }
+  return { entidades: out, props, aviso: out.length ? '' : 'Nenhum registro de autor com este nome (VIAF, Open Library).' };
+}
+export async function nobel(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const d = await ctx.json(`https://api.nobelprize.org/2.1/laureates?name=${encodeURIComponent(nome)}`);
+  const l = ((d && d.laureates) || []).filter((x) => nomeCasa(nome, (x.fullName && x.fullName.en) || (x.knownName && x.knownName.en) || ''))[0];
+  if (!l) return { entidades: [], props: { 'Prêmio Nobel': 'não' } };
+  const out = [];
+  for (const p of l.nobelPrizes || []) for (const a of p.affiliations || []) if (a.name && a.name.en) out.push(ent('organizacao', a.name.en, `afiliação no Nobel de ${p.awardYear}`));
+  return { entidades: unicos(out), props: { 'Prêmio Nobel': (l.nobelPrizes || []).map((p) => `${(p.category && p.category.en) || ''} ${p.awardYear}`).join(', '), motivação: ((l.nobelPrizes || [])[0] && l.nobelPrizes[0].motivation && l.nobelPrizes[0].motivation.en) || '' } };
+}
+
+// ---------- imprensa mundial: menções recentes (GDELT) ----------
+export async function imprensa(ctx, nome) {
+  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+  const r = await ctx.pagina(`https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent('"' + nome + '"')}&mode=artlist&format=json&maxrecords=20&sort=datedesc`, { timeout: 40000 });
+  if (r.status === 429) throw new Falha('O GDELT está limitando as consultas deste IP (aceita uma a cada 5 segundos e bloqueia por um tempo depois de várias seguidas); tente de novo mais tarde.', { status: 429 });
+  let arts = [];
+  try { arts = (JSON.parse(r.texto).articles || []); } catch {}
+  const out = arts.slice(0, Math.max(5, Math.min(20, Number(ctx.limite) || 15))).map((a) => ent('url', a.url, 'citado na imprensa', { rotulo: `${a.domain} · ${curtoT(a.title || '', 40)}`, props: { título: a.title || '', publicado: a.seendate ? `${a.seendate.slice(0, 4)}-${a.seendate.slice(4, 6)}-${a.seendate.slice(6, 8)}` : '', país: a.sourcecountry || '', idioma: a.language || '' } }));
+  const veiculos = {};
+  for (const a of arts) veiculos[a.domain] = (veiculos[a.domain] || 0) + 1;
+  return { entidades: out, props: { 'menções na imprensa (últimos 3 meses)': arts.length ? `${arts.length}${arts.length >= 20 ? '+' : ''}` : 0, 'veículos': Object.keys(veiculos).slice(0, 6).join(', ') }, aviso: arts.length ? '' : 'Nenhuma menção na imprensa nos últimos 3 meses (GDELT).' };
+}
+
 // ---------- VirusTotal (opcional: chave no Cofre) ----------
 const VT = 'https://www.virustotal.com/api/v3/';
 async function vt(ctx, caminho) {
@@ -1677,7 +1866,15 @@ export const TRANSFORMACOES = [
   { id: 'openalex', de: ['pessoa'], nome: 'Pesquisador: ORCID, instituição e citações', fonte: 'OpenAlex', run: openalex },
   { id: 'pgp-nome', de: ['pessoa'], nome: 'Chaves PGP com este nome', fonte: 'keyserver.ubuntu.com', run: pgpNome },
   { id: 'bluesky-busca', de: ['pessoa'], nome: 'Contas no Bluesky com este nome', fonte: 'Bluesky', run: blueskyBusca },
-  { id: 'deputado', de: ['pessoa'], nome: 'Deputado(a) federal: partido, estado, e-mail do gabinete', fonte: 'Câmara dos Deputados', run: deputado },
+  { id: 'parlamentar', de: ['pessoa'], nome: 'Parlamentar: mandatos, partidos, ocupações, comissões', fonte: 'Câmara (desde 1826) e Senado (desde 1946)', run: parlamentar },
+  { id: 'sancoes', de: ['pessoa', 'organizacao'], nome: 'Listas de sanções (OFAC, ONU, União Europeia)', fonte: 'Tesouro dos EUA, ONU, UE', rapida: true, run: sancoes },
+  { id: 'stf', de: ['pessoa'], nome: 'Processos no STF em que é parte', fonte: 'STF', run: stf },
+  { id: 'dou', de: ['pessoa'], nome: 'Atos no Diário Oficial da União (nomeações, punições, contratos)', fonte: 'Imprensa Nacional', run: dou },
+  { id: 'tcu', de: ['pessoa'], nome: 'Inabilitado para cargo público ou proibido de licitar', fonte: 'TCU', rapida: true, run: tcu },
+  { id: 'offshore', de: ['pessoa'], nome: 'Possíveis menções em vazamentos de offshores', fonte: 'ICIJ Offshore Leaks', run: offshore },
+  { id: 'autor', de: ['pessoa'], nome: 'Autor(a): bibliotecas nacionais e livros', fonte: 'VIAF + Open Library', run: autor },
+  { id: 'nobel', de: ['pessoa'], nome: 'Prêmio Nobel', fonte: 'Fundação Nobel', run: nobel },
+  { id: 'imprensa', de: ['pessoa', 'organizacao'], nome: 'Menções na imprensa mundial (últimos 3 meses)', fonte: 'GDELT', run: imprensa },
   { id: 'fediverso', de: ['pessoa', 'apelido'], nome: 'Contas no fediverso (Mastodon e outras instâncias)', fonte: 'mastodon.social', run: fediverso },
   { id: 'launchpad', de: ['pessoa', 'apelido'], nome: 'Conta no Launchpad: apelidos de IRC e chaves', fonte: 'Launchpad', run: launchpad },
   { id: 'stackexchange', de: ['pessoa', 'apelido'], nome: 'Perfil no Stack Overflow e contas da rede', fonte: 'Stack Exchange (300 por dia)', run: stackexchange },

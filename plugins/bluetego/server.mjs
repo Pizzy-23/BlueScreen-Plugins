@@ -28,7 +28,7 @@ async function pedir(url, opt = {}) {
   const fora = FORA.get(host);
   if (fora && Date.now() < fora.ate) throw new Falha(`${fora.motivo} (pulado: tento de novo às ${new Date(fora.ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`, { status: 503 });
   try {
-    const r = await fetch(url, { headers: { 'user-agent': AGENTE, ...(opt.headers || {}) }, redirect: opt.redirect || 'follow', signal: AbortSignal.timeout(opt.timeout || 25000) });
+    const r = await fetch(url, { method: opt.method || 'GET', body: opt.body, headers: { 'user-agent': AGENTE, ...(opt.headers || {}) }, redirect: opt.redirect || 'follow', signal: AbortSignal.timeout(opt.timeout || 25000) });
     FORA.delete(host);
     return r;
   } catch (e) {
@@ -62,6 +62,11 @@ const ctxRede = {
       texto = Buffer.concat(partes.map((x) => Buffer.from(x))).toString('utf8');
     } else r.body?.cancel().catch(() => {});
     return { status: r.status, url: r.url || url, headers, texto };
+  },
+  async post(url, corpo, opt = {}) {
+    const r = await pedir(url, { method: 'POST', timeout: opt.timeout || 30000, headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(corpo) });
+    if (!r.ok) throw new Falha(`${new URL(url).host} respondeu ${r.status}.`, { status: 502 });
+    return r.json();
   },
   // arquivo inteiro (documentos para ler os metadados), até "max" bytes: maior que isso, desiste sem baixar o resto
   async binario(url, opt = {}) {

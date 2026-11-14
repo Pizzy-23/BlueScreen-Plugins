@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.4.0 |
+| **Versão** | 0.5.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 78 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 86 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -129,7 +129,12 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Conta | ⚡ Nome de usuário da conta (para procurar o mesmo nome em outros sites) | local |
 | Pessoa | ⚡ Pessoa pública: cargos, onde trabalha e estudou, contas oficiais | Wikidata |
 | Pessoa | ⚡ Quantas pessoas no Brasil têm o primeiro nome (risco de homônimo) e a década mais comum de nascimento | IBGE (Censo) |
-| Pessoa | Pesquisador: ORCID, instituição e citações · chaves PGP com o nome · contas no Bluesky com o nome · deputado(a) federal | OpenAlex, keyserver.ubuntu.com, Bluesky, Câmara dos Deputados |
+| Pessoa | Pesquisador: ORCID, instituição e citações · chaves PGP com o nome · contas no Bluesky com o nome | OpenAlex, keyserver.ubuntu.com, Bluesky |
+| Pessoa | ⚡ Listas de sanções: EUA, ONU e União Europeia, com cargo e dados para descartar homônimo · ⚡ inabilitado para cargo público ou proibido de licitar | OFAC, ONU, UE, TCU |
+| Pessoa | Parlamentar desde o Império: mandatos e partidos na Câmara, nascimento, ocupações declaradas; no Senado (desde 1946) comissões e suplentes | Câmara dos Deputados, Senado Federal |
+| Pessoa | Processos no STF em que é parte · atos no Diário Oficial da União (nomeações, exonerações, punições, contratos), com o trecho e o órgão | STF, Imprensa Nacional |
+| Pessoa | Possíveis menções em vazamentos de offshores (Panama, Paradise e Pandora Papers) | ICIJ Offshore Leaks |
+| Pessoa | Autor(a): registro nas bibliotecas nacionais e livros · Prêmio Nobel · menções na imprensa mundial nos últimos 3 meses | VIAF, Open Library, Fundação Nobel, GDELT |
 | Conta (ORCID) | Perfil completo do ORCID: empregos com cargo e ano, sites, e-mails públicos, outros nomes | ORCID |
 | Pessoa | E-mails prováveis nos domínios ligados à pessoa, confirmados no Gravatar | DNS + Gravatar |
 | Pessoa | Pesquisador com o nome e a instituição · contas do GitHub com o nome · artigos da Wikipédia · apelidos prováveis | ORCID, GitHub, Wikipédia, local |
@@ -164,7 +169,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | **Inteligência de ameaça** | IP | relatórios de ameaça, domínios que já apontaram para o IP e a reputação de cada um |
 | **Quem é este e-mail** | E-mail | domínio, Gravatar, contas do GitHub com o e-mail, a web e o mesmo nome de usuário em outros sites |
 | **Rastro do apelido** | Apelido | contas em 18 sites com os dados de cada perfil e em centenas de outros, o GitHub a fundo, a web e o Gravatar dos e-mails |
-| **Pegada da pessoa** | Pessoa | Wikidata, ORCID, Wikipédia, contas do GitHub com o nome, a web, e os apelidos prováveis com as contas que existem |
+| **Pegada da pessoa** | Pessoa | Quantas pessoas têm o nome (IBGE), Wikidata, ORCID, Wikipédia, mandatos na Câmara e no Senado, sanções, TCU, processos no STF, Diário Oficial da União, Offshore Leaks, livros, Nobel, chaves PGP, contas com o nome (GitHub, Bluesky, fediverso, Stack Overflow, Launchpad), a web, e os apelidos prováveis com as contas que existem |
 | **Empresa brasileira** | CNPJ | Receita, as empresas sócias e a matriz, CEP, Wikidata e o domínio do e-mail |
 | **Rastro do telefone** | Telefone | tipo e região, apps de mensagem, onde o número aparece na web e o que essas páginas citam |
 | **Rastro da carteira** | Carteira cripto | saldo e as carteiras que mais mandaram e receberam, e o mesmo para cada uma delas |
@@ -192,8 +197,10 @@ Aba Plugins › engrenagem do Bluetego:
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
 - **CPF:** o Bluetego valida o CPF e mostra a região fiscal de emissão, e cruza com o CPF mascarado que a Receita publica dos sócios. Ele **não** descobre de quem é um CPF nem procura CPF na web: as fontes que fazem isso usam bases vazadas, e o Bluetego não usa.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
-- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
+- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
 - **E-mail escondido não é revelado:** o Launchpad acha a conta de um e-mail mesmo quando o dono escolheu escondê-lo, e por isso o Bluetego só consulta o Launchpad por nome e apelido. Nome em chave PGP do keyserver.ubuntu.com é autodeclarado (qualquer um publica uma chave com qualquer nome), e a ligação diz isso.
+- **Nome completo e homônimos:** as fontes de nome só consultam com nome e sobrenome e só aceitam um resultado quando todas as palavras do nome aparecem nele (em qualquer ordem, sem acento). Processo, ato do Diário Oficial, sanção e menção em vazamento continuam podendo ser de um homônimo: a ligação diz isso, e as propriedades trazem o que serve para conferir (nascimento, município, cargo, trecho).
+- **CPF do TCU é descartado:** a lista de inabilitados e inidôneos do TCU publica o CPF completo; o Bluetego não mostra, não guarda e não cria entidade com ele.
 - **Para onde vão os valores:** cada transformação manda o valor à fonte da tabela acima. "Ler o site", "Tecnologias", "Certificado" e "Seguir redirecionamentos" acessam o próprio site do alvo, que vê o seu IP.
 - **IA:** o resumo do grafo (valores, propriedades e anotações) vai para o provedor escolhido. Com os Agentes de IA da IDE ou a API da Anthropic, ele sai do PC; com o Ollama, não sai.
 - **Onde ficam as investigações:** `~/.bluescreen/plugin-data/bluetego/files/investigacoes/`, uma por arquivo JSON. As exportações vão para `files/exportacoes/`, e o Explorer abre na pasta.
@@ -207,7 +214,8 @@ Aba Plugins › engrenagem do Bluetego:
 - O Querido Diário (diários oficiais municipais) ficou de fora por enquanto: a API estava fora do ar.
 - A HackerTarget (DNS reverso, subdomínios e IDs de rastreamento) deixa 50 consultas gratuitas por dia; quando acabam, a transformação avisa.
 - Outras cotas gratuitas: GreyNoise (25 consultas), Stack Exchange (300 por dia), urlscan (30 por minuto e só os últimos 30 dias), Tranco (1 por segundo).
-- Ficaram de fora por não serem confiáveis sem chave: abuse.ch (MalwareBazaar, URLhaus, ThreatFox passaram a exigir chave), ransomware.live (respondia 404 para qualquer busca), BGPView (fora do ar), archive.today (bloqueia robôs), DBLP (desafio anti-robô).
+- Ficaram de fora por não serem confiáveis sem chave: abuse.ch (MalwareBazaar, URLhaus, ThreatFox passaram a exigir chave), ransomware.live (respondia 404 para qualquer busca), BGPView (fora do ar), archive.today (bloqueia robôs), DBLP (desafio anti-robô). Para nomes: Interpol, FBI, SEC EDGAR, TSE, STJ, Lattes, Library of Congress e CourtListener bloqueiam robôs; OpenSanctions, Portal da Transparência, OpenCorporates e Companies House exigem chave; Querido Diário estava fora do ar.
+- As listas de sanções são baixadas inteiras e guardadas por um dia (a da União Europeia tem 25 MB): a primeira consulta do dia demora uns 30 segundos. O GDELT (imprensa) aceita uma consulta a cada 5 segundos e bloqueia o IP por um tempo depois de várias seguidas; por isso não entra em máquina, só roda à mão.
 - Documentos no formato antigo (`.doc`, `.xls`) e PDFs criptografados não têm os metadados lidos.
 - Grafos com mais de 2.000 entidades ficam lentos para organizar; esconda tipos pela legenda ou recolha os resultados grandes.
 
@@ -218,6 +226,7 @@ node tests/logica.test.mjs
 node tests/novidades.test.mjs
 node tests/avancadas.test.mjs
 node tests/fontes.test.mjs
+node tests/nomes.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -227,6 +236,16 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.5.0
+
+- **Busca por nome completo com 9 transformações novas**, de fontes oficiais testadas ao vivo com pessoas públicas e com um nome que não existe:
+  - **Sanções num clique:** OFAC (EUA), ONU e União Europeia, e o TCU (inabilitados para cargo público e proibidos de licitar).
+  - **Justiça e governo:** processos no STF em que o nome é parte e atos no Diário Oficial da União.
+  - **Parlamentares:** a antiga transformação de deputado passa a cobrir todas as legislaturas da Câmara (com nascimento e ocupações declaradas) e o Senado desde 1946 (comissões e suplentes).
+  - **Outras:** Offshore Leaks do ICIJ, registro nas bibliotecas nacionais (VIAF) e livros (Open Library), Prêmio Nobel e menções na imprensa mundial (GDELT, só à mão).
+- Os resultados só valem com todas as palavras do nome, e o CPF da lista do TCU é descartado.
+- A máquina "Pegada da pessoa" usa as fontes novas.
 
 ### 0.4.0
 
