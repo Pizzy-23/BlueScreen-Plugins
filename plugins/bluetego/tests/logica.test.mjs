@@ -59,9 +59,15 @@ caso('extrair: acha cada tipo num texto misturado, sem nomes de arquivo', () => 
   assert.deepEqual(por.telefone, ['+555133334444']);
 });
 caso('telefone: país e, no Brasil, estado e celular', () => {
-  assert.deepEqual(telefoneInfo('+55 51 99999-1234'), { ddi: '+55', pais: 'Brasil', ddd: 51, uf: 'RS', estado: 'Rio Grande do Sul', celular: true });
+  const i = telefoneInfo('+55 51 99999-1234');
+  assert.deepEqual([i.ddi, i.pais, i.ddd, i.uf, i.estado, i.celular, i.tipo], ['+55', 'Brasil', 51, 'RS', 'Rio Grande do Sul', true, 'celular']);
+  assert.match(i.regiao, /Porto Alegre/);
+  assert.ok(i.formatos.includes('(51) 99999-1234'));
   assert.equal(telefoneInfo('+351 912 345 678').pais, 'Portugal');
-  assert.equal(telefoneInfo('51 99999-1234'), null);
+  // sem o +55, um número com DDD válido também é reconhecido
+  assert.equal(telefoneInfo('51 99999-1234').uf, 'RS');
+  assert.equal(telefoneInfo('0800 123 4567').tipo, 'gratuito (0800)');
+  assert.equal(telefoneInfo('12345'), null);
 });
 caso('nomeReverso: IPv4 e IPv6', () => {
   assert.equal(nomeReverso('8.8.4.4'), '4.4.8.8.in-addr.arpa');
@@ -206,7 +212,13 @@ caso('github: perfil e e-mails dos commits, sem os noreply', async () => {
 caso('conta-apelido e telefone (locais)', async () => {
   assert.deepEqual((await rodar('conta-apelido', 'conta', 'https://www.linkedin.com/in/fulano-tal/', falso({}))).entidades.map((e) => e.valor), ['fulano-tal']);
   const t = await rodar('telefone', 'telefone', '+55 11 3000-0000', falso({}));
-  assert.equal(t.entidades[0].valor, 'São Paulo, Brasil'); assert.equal(t.props.tipo, 'fixo');
+  assert.equal(t.entidades[0].valor, 'São Paulo e Grande SP (SP)'); assert.equal(t.props.tipo, 'fixo');
+  // fixo não ganha links de app de mensagem; celular ganha WhatsApp, Telegram e Signal
+  assert.equal(t.entidades.length, 1);
+  const c = await rodar('telefone', 'telefone', '(51) 99999-1234', falso({}));
+  assert.deepEqual(c.entidades.filter((e) => e.tipo === 'conta').map((e) => e.valor), ['https://wa.me/5551999991234', 'https://t.me/+5551999991234', 'https://signal.me/#p/+5551999991234']);
+  assert.match(c.props['jeitos de escrever'], /\(51\) 99999-1234/);
+  assert.deepEqual((await rodar('conta-apelido', 'conta', 'https://wa.me/5551999991234', falso({}))).entidades, []);
 });
 caso('cve: resumo, CVSS, fornecedor e EPSS', async () => {
   const ctx = falso({
