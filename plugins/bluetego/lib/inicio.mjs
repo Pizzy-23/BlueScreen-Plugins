@@ -41,7 +41,11 @@ export const INICIO = {
   ],
   // CPF: só o que é público por lei (validade, região fiscal, condenação no TCU); nunca o dono
   cpf: [{ t: 'cpf', max: 1 }, { t: 'cpf-tcu', max: 1 }, { t: 'sancoes-br', max: 1, tipos: ['cpf'], lim: 4 }],
-  organizacao: [{ t: 'wikidata', max: 1, lim: 8 }, { t: 'sancoes', max: 1, tipos: ['organizacao'] }],
+  // empresa pelo nome e a cidade: endereço, telefone, perfis e o CNPJ que a Receita confirma (e os dados dele)
+  organizacao: [
+    { t: 'localizar-empresa', max: 1, lim: 10 }, { t: 'cnpj', max: 1, lim: 8 },
+    { t: 'wikidata', max: 1, lim: 8 }, { t: 'sancoes', max: 1, tipos: ['organizacao'] },
+  ],
 };
 
 // fica o que importa: alertas primeiro, só os tipos pedidos, no máximo "lim"; entidade que pendia de outra podada

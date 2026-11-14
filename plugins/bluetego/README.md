@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.10.0 |
+| **Versão** | 0.11.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 104 transformações usam fontes públicas e gratuitas. VirusTotal, Portal da Transparência, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 105 transformações usam fontes públicas e gratuitas. VirusTotal, Portal da Transparência, Brave Search, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -147,6 +147,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Conta (ORCID) | Perfil completo do ORCID: empregos com cargo e ano, sites, e-mails públicos, outros nomes | ORCID |
 | Pessoa | E-mails prováveis nos domínios ligados à pessoa, confirmados no Gravatar | DNS + Gravatar |
 | Pessoa | Pesquisador com o nome e a instituição · contas do GitHub com o nome · artigos da Wikipédia · apelidos prováveis | ORCID, GitHub, Wikipédia, local |
+| Organização | Localizar a empresa pelo nome e a cidade ("Oficina de Costura Neca tramandai"): endereço com CEP e mapa, telefone, perfis nas redes, as páginas que a citam e o CNPJ que a Receita confirma (mesma cidade e nome parecido) | busca na web (DuckDuckGo, Bing; Brave com a chave gratuita no Cofre), fichas schema.org dos diretórios, IBGE, Receita |
 | Organização | ⚡ Site oficial, sede, donos, fundadores · artigos da Wikipédia | Wikidata, Wikipédia |
 | CNPJ | ⚡ Razão social, nome fantasia, sócios (empresas sócias viram CNPJ), endereço, CEP, telefone, e-mail, regime (Simples, MEI) com a tributação ano a ano e as datas de entrada e saída do Simples e do MEI, atividades, matriz da filial | Receita (BrasilAPI, com a Minha Receita de reserva) |
 | CNPJ | Contratos com o poder público em todas as esferas (quem contratou a empresa e quem ela contratou, com valores) e o cadastro de fornecedor federal | PNCP, Compras.gov |
@@ -214,6 +215,7 @@ Aba Plugins › engrenagem do Bluetego:
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
 - **CPF:** o Bluetego valida o CPF, mostra a região fiscal de emissão, cruza com o CPF mascarado que a Receita publica dos sócios e faz a verificação de integridade que compliance e due diligence fazem: condenação no TCU e, com a chave do Portal da Transparência, sanções, expulsões, PEP, servidor federal e contratos com o governo. O nome só aparece quando a própria fonte oficial o publica junto do CPF (condenado, sancionado, servidor, PEP). Ele **não** descobre de quem é um CPF: não consulta cadastro de pessoa física (nome, endereço, telefone) nem benefícios sociais, não usa bases vazadas e não procura CPF na web. Dado pessoal é protegido pela LGPD, e consulta de dono de CPF é a ferramenta de quem aplica golpe.
 - **Listas que só publicam o CPF mascarado ficam de fora por CPF** (Banco Central, PGFN, PEP): a máscara casa com cerca de mil pessoas, e cruzar por ela seria descobrir o dono do CPF. Pelo mesmo motivo, o Bluetego não busca empresas pela máscara do CPF do sócio.
+- **Chave do Brave Search (opcional):** o plano gratuito da API do Brave Search melhora o localizador de empresas, que sem ela depende do DuckDuckGo (bloqueia muitas buscas seguidas) e do Bing de reserva. Guarde no Cofre como `bluetego.brave`.
 - **Chave do Portal da Transparência:** gratuita, tirada com o e-mail em portaldatransparencia.gov.br/api-de-dados/cadastrar-email e guardada no Cofre da IDE (`bluetego.transparencia`). Sem ela, a transformação pede a chave.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
 - **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. Os dados do IBAMA são ODbL, os do TCE-RS são CC BY, o IPsum é de domínio público (Unlicense) e os dados do registro.br não podem ser redistribuídos nem usados comercialmente. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). A numeração de telefones vem do libphonenumber do Google (Apache-2.0, em `vendor/libphonenumber`), os dados do mapa são do OpenStreetMap (ODbL, © colaboradores do OpenStreetMap) e o Wikidata é CC0. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
@@ -257,6 +259,7 @@ node tests/integridade.test.mjs
 node tests/empresa.test.mjs
 node tests/sancoes-br.test.mjs
 node tests/ip.test.mjs
+node tests/localizar.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -266,6 +269,15 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.11.0
+
+- **Localizar uma empresa pelo nome e a cidade**, como o Google faz: escreva "Oficina de Costura Neca tramandai" no Investigar.
+  - O texto com palavra de negócio (oficina, loja, padaria, costura, Ltda…) vira empresa, não pessoa; a cidade no fim é reconhecida pela lista de municípios do IBGE (sem acento, com ou sem a UF; "Pedro Osório" não é "Osório").
+  - Procura na web (DuckDuckGo, Bing de reserva e, com a chave gratuita no Cofre, o Brave Search), fica só com as páginas que citam o nome inteiro e a cidade, e lê a ficha schema.org dos diretórios: telefone, endereço com CEP, coordenadas e perfis.
+  - O CNPJ achado só entra se a Receita confere a cidade e o nome; o primeiro olhar já traz os dados dele.
+  - Com a cidade informada, página de outra cidade não entra no grafo (é outra empresa com o mesmo nome).
+- Correção: o texto dos resultados de busca perdia as letras acentuadas escritas como entidade HTML (`&#237;` virava espaço: "Tramanda", "S o Jos") e separava a palavra destacada pelo buscador ("Tramanda í"). Valia para todas as buscas na web.
 
 ### 0.10.0
 

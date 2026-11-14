@@ -110,6 +110,10 @@ export const ehIP = (v) => RE.ipv4.test(String(v).trim()) || ehIPv6(v);
 const tldBom = (d) => { const t = d.replace(/\.$/, '').split('.').pop().toLowerCase(); return !NAO_TLD.has(t) && !/^\d+$/.test(t); };
 
 // adivinha o tipo de um valor digitado ou colado
+// palavras de negócio: com uma delas, o texto é nome de empresa (a forma jurídica ou o ramo); as siglas (ME, SA, CIA)
+// só contam em maiúsculas, porque "me" e "sa" também são palavras comuns
+const semAcentoE = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+export const NEGOCIO = /\b(ltda|eireli|comercio|industria|servicos|oficina|loja|lojas|padaria|confeitaria|mercado|supermercado|minimercado|mercearia|acougue|farmacia|drogaria|restaurante|lanchonete|pizzaria|hamburgueria|churrascaria|sorveteria|cafeteria|bar|salao|barbearia|estetica|clinica|consultorio|odontologia|laboratorio|hospital|escritorio|imobiliaria|construtora|incorporadora|autopecas|auto pecas|mecanica|borracharia|funilaria|auto center|posto|pet ?shop|veterinaria|academia|escola|colegio|creche|faculdade|curso|hotel|pousada|hostel|distribuidora|atacado|atacadista|transportadora|transportes|logistica|costura|atelie|atelier|confeccao|confeccoes|estudio|studio|agencia|contabilidade|contabil|advocacia|advogados|igreja|associacao|cooperativa|sindicato|fundacao|instituto|fazenda|sitio|floricultura|papelaria|livraria|otica|vidracaria|serralheria|marcenaria|grafica|lavanderia|moveis|materiais de construcao|madeireira|ferragens|ferragista|calcados|boutique|joalheria|relojoaria|tecnologia|informatica|software|engenharia|consultoria|seguros|corretora|turismo|viagens|eventos|buffet|fotografia|marketing|publicidade|grupo|empreendimentos|participacoes|holding)\b/;
 export function detectar(valor) {
   const v = String(valor ?? '').trim();
   if (!v) return 'texto';
@@ -129,6 +133,8 @@ export function detectar(valor) {
   if (RE.dominio.test(v) && tldBom(v)) return 'dominio';
   if (RE.apelido.test(v)) return 'apelido';
   if (RE.telefone.test(v) && (v.trim().startsWith('+') || telefoneBR(v))) return 'telefone';
+  // nome de negócio ("Oficina de Costura Neca Tramandaí", "Padaria Pão Quente Ltda"): é empresa, não pessoa
+  if (/^[A-Za-zÀ-ÿ0-9'&.,/-]+(\s+[A-Za-zÀ-ÿ0-9'&.,/-]+){1,11}$/.test(v) && (NEGOCIO.test(semAcentoE(v)) || /\b(ME|MEI|EPP|S\/A|SA|CIA|Cia)\b/.test(v))) return 'organizacao';
   if (/^[A-Za-zÀ-ÿ'-]+(\s+[A-Za-zÀ-ÿ'-]+){1,4}$/.test(v)) return 'pessoa';
   // apelido tem pelo menos uma letra: CPF, CEP e números soltos não são apelido
   if (/^[A-Za-z0-9_.-]{3,39}$/.test(v) && /[A-Za-z]/.test(v)) return 'apelido';

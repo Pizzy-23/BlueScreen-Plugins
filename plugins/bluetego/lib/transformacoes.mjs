@@ -16,6 +16,7 @@ import { cpfTcu, transparencia } from './integridade.mjs';
 import { pncp, bndes, registroBr, reguladores } from './empresa.mjs';
 import { sancoesBr } from './sancoes-br.mjs';
 import { nuvem, listasAmeaca, ipHistorico, dnsPassivo, proxyVpn, certificadoIp } from './ip.mjs';
+import { localizarEmpresa } from './localizar.mjs';
 import { normalizar, chave, cnpjValido, regiaoCPF, telefoneInfo, nomeReverso, extrair, apelidosDeNome, ehIP, detectar } from './entidades.mjs';
 
 export class Falha extends Error {
@@ -405,7 +406,17 @@ export function nomeApelidos(_ctx, nome) {
 // sites que dizem com certeza se o usuário existe (API com 404, lista vazia ou marca na página): sem falso positivo.
 // De cada conta achada sai também o que o perfil mostra: nome, cidade, site, empresa.
 // (npm, PyPI, Bitbucket e Codeberg ficaram de fora: respondem igual para quem existe e para quem não existe)
-const tira = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+// texto de HTML: marcação de destaque (<b>Tramanda</b>í) some sem deixar espaço; as outras viram espaço; as letras
+// escritas como entidade (&#237;, &iacute;) voltam a ser letras, em vez de sumirem
+const ENTIDADES_HTML = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ordm: 'º', ordf: 'ª', deg: '°', middot: '·', ndash: '–', mdash: '—', hellip: '…', laquo: '«', raquo: '»' };
+const decodificaEntidade = (m, x) => {
+  if (x[0] === '#') { const n = x[1] === 'x' || x[1] === 'X' ? parseInt(x.slice(2), 16) : parseInt(x.slice(1), 10); return Number.isFinite(n) && n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ' '; }
+  if (ENTIDADES_HTML[x]) return ENTIDADES_HTML[x];
+  // letras acentuadas: &aacute; &Atilde; &ccedil; &ecirc; &uuml;…
+  const a = /^([a-zA-Z])(acute|grave|circ|tilde|uml|cedil)$/.exec(x);
+  return a ? (a[1] + { acute: '́', grave: '̀', circ: '̂', tilde: '̃', uml: '̈', cedil: '̧' }[a[2]]).normalize('NFC') : ' ';
+};
+const tira = (s) => String(s || '').replace(/<\/?(b|strong|em|i|u|mark|span|wbr)\b[^>]*>/gi, '').replace(/<[^>]+>/g, ' ').replace(/&([a-z]+|#\d+|#x[0-9a-f]+);/gi, decodificaEntidade).replace(/\s+/g, ' ').trim();
 const cdata = (t, tag) => tira(((String(t).match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`)) || [])[1]));
 const SITES = [
   { nome: 'GitHub', url: (u) => `https://api.github.com/users/${u}`, gh: true, achou: (d) => d && d.login, perfil: (d) => d.html_url, dados: (d) => ({ nome: d.name, local: d.location, site: d.blog, empresa: d.company, bio: d.bio }) },
@@ -591,7 +602,7 @@ export function lerBing(html) {
 }
 // buscadores bloqueiam muitas consultas automáticas seguidas (o DuckDuckGo responde 202 com um desafio):
 // isso volta como "bloqueado", para o aviso dizer a verdade em vez de "nada encontrado"
-async function buscaWeb(ctx, consulta) {
+export async function buscaWeb(ctx, consulta) {
   let bloqueado = false;
   try {
     const r = await ctx.pagina(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(consulta)}&kl=br-pt`, { navegador: true });
@@ -2088,6 +2099,7 @@ export const TRANSFORMACOES = [
   { id: 'tellows', de: ['telefone'], nome: 'Reputação de spam e golpe', fonte: 'tellows', run: tellows },
   { id: 'telefone', de: ['telefone'], nome: 'Tipo, operadora original, região, cidades do DDD e apps de mensagem', fonte: 'local + BrasilAPI', rapida: true, run: telefone },
   { id: 'web', de: ['telefone', 'email', 'apelido', 'pessoa', 'cnpj', 'organizacao', 'dominio', 'cripto', 'hash'], nome: 'Procurar na web', fonte: 'DuckDuckGo (Bing de reserva)', run: web },
+  { id: 'localizar-empresa', de: ['organizacao'], nome: 'Localizar a empresa pelo nome e a cidade: endereço, telefone, perfis, CNPJ', fonte: 'busca na web (Brave com chave) + fichas dos diretórios + Receita', run: localizarEmpresa },
   { id: 'wikidata', de: ['organizacao'], nome: 'Site oficial, sede, donos e fundadores', fonte: 'Wikidata', rapida: true, run: wikidata },
   { id: 'cnpj', de: ['cnpj'], nome: 'Razão social, sócios, endereço, regime e matriz', fonte: 'Receita (BrasilAPI ou Minha Receita)', rapida: true, run: cnpj },
   { id: 'pncp', de: ['cnpj'], nome: 'Contratos com o poder público (federal, estadual, municipal)', fonte: 'PNCP + Compras.gov', run: pncp },
