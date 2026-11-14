@@ -177,6 +177,19 @@ casoServidor('servidor: erro que não é de conexão não liga o disjuntor; temp
   assert.equal(pedidos, 1);
   assert.match(r4.body.error, /pulado/);
 });
+// (o geo: o host do InternetDB ficou no disjuntor pelo caso anterior)
+casoServidor('servidor: conexão derrubada (ECONNRESET) tenta de novo uma vez antes do disjuntor', async () => {
+  let pedidos = 0;
+  const reset = () => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+  globalThis.fetch = async () => { pedidos++; if (pedidos === 1) throw reset(); return new Response('{"success":true,"ip":"1.1.1.2","country":"X"}', { status: 200, headers: { 'content-type': 'application/json' } }); };
+  const r = await chamar('transformar', { t: 'geo', tipo: 'ip', valor: '1.1.1.2', deNovo: true });
+  assert.equal(pedidos, 2, 'tentou de novo');
+  assert.ok(!r.body || !r.body.error, 'a segunda tentativa valeu');
+  pedidos = 0;
+  globalThis.fetch = async () => { pedidos++; throw reset(); };
+  await chamar('transformar', { t: 'geo', tipo: 'ip', valor: '1.1.1.3', deNovo: true });
+  assert.equal(pedidos, 2, 'só uma nova tentativa, sem laço');
+});
 casoServidor('servidor: resposta de erro tem o corpo descartado e JSON inválido no POST vira Falha', async () => {
   const respostas = [];
   globalThis.fetch = async (url) => { const r = new Response(String(url).includes('icij') ? '<html>' : '{"erro":1}', { status: String(url).includes('icij') ? 200 : 500, headers: { 'content-type': 'application/json' } }); respostas.push(r); return r; };

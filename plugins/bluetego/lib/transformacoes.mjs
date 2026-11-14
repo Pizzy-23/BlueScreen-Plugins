@@ -13,6 +13,9 @@ import { procurar as procurarMaigret, sitesMaigret } from './maigret.mjs';
 import { numeracao } from './numeracao.mjs';
 import { githubCommits } from './github.mjs';
 import { cpfTcu, transparencia } from './integridade.mjs';
+import { pncp, bndes, registroBr, reguladores } from './empresa.mjs';
+import { sancoesBr } from './sancoes-br.mjs';
+import { nuvem, listasAmeaca, ipHistorico, dnsPassivo, proxyVpn, certificadoIp } from './ip.mjs';
 import { normalizar, chave, cnpjValido, regiaoCPF, telefoneInfo, nomeReverso, extrair, apelidosDeNome, ehIP, detectar } from './entidades.mjs';
 
 export class Falha extends Error {
@@ -913,12 +916,15 @@ export async function cnpj(ctx, valor) {
   }
   const situacao = d.descricao_situacao_cadastral || '';
   const simples = d.opcao_pelo_mei ? 'MEI' : d.opcao_pelo_simples ? 'Simples Nacional' : d.opcao_pelo_simples === false ? 'não é do Simples' : '';
+  // o histórico que a BrasilAPI traz: a tributação ano a ano e quando entrou e saiu do Simples e do MEI
+  const tributacao = (Array.isArray(d.regime_tributario) ? d.regime_tributario : []).filter((x) => x && x.ano).sort((a, b) => b.ano - a.ano).slice(0, 4).map((x) => `${x.ano}: ${String(x.forma_de_tributacao || '').toLowerCase()}`).join(' · ');
+  const datasSimples = [d.data_opcao_pelo_simples && `entrou no Simples em ${d.data_opcao_pelo_simples}`, d.data_exclusao_do_simples && `saiu do Simples em ${d.data_exclusao_do_simples}`, d.data_opcao_pelo_mei && `virou MEI em ${d.data_opcao_pelo_mei}`, d.data_exclusao_do_mei && `deixou de ser MEI em ${d.data_exclusao_do_mei}`].filter(Boolean).join('; ');
   return {
     entidades: unicos(out), alerta: !!situacao && !/ativa/i.test(situacao),
     props: {
       situação: situacao + (d.descricao_motivo_situacao_cadastral && !/sem motivo/i.test(d.descricao_motivo_situacao_cadastral) ? ` (${d.descricao_motivo_situacao_cadastral.toLowerCase()})` : ''), 'situação desde': d.data_situacao_cadastral || '',
       abertura: d.data_inicio_atividade || '', atividade: d.cnae_fiscal_descricao || '', 'outras atividades': (d.cnaes_secundarios || []).map((c) => c.descricao).filter(Boolean).slice(0, 6).join('; '),
-      'capital social': d.capital_social ? Number(d.capital_social).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '', porte: d.porte || '', natureza: d.natureza_juridica || '', regime: simples,
+      'capital social': d.capital_social ? Number(d.capital_social).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '', porte: d.porte || '', natureza: d.natureza_juridica || '', regime: simples, 'tributação por ano': tributacao, 'Simples e MEI': datasSimples,
       tipo: d.descricao_identificador_matriz_filial || '', 'situação especial': d.situacao_especial || '',
       risco: situacao && !/ativa/i.test(situacao) ? `empresa com situação ${situacao.toLowerCase()} na Receita` : '',
     },
@@ -1742,8 +1748,9 @@ export async function stf(ctx, nome) {
 }
 
 // ---------- Diário Oficial da União: nomeações, exonerações, punições, contratos ----------
-export async function dou(ctx, nome) {
-  const falta = exigeNomeCompleto(nome); if (falta) return falta;
+export async function dou(ctx, nome, tipo) {
+  // CNPJ: procura o número formatado (registros da ANVISA, extratos de contrato, notificações)
+  if (tipo !== 'cnpj') { const falta = exigeNomeCompleto(nome); if (falta) return falta; }
   const r = await ctx.pagina(`https://www.in.gov.br/consulta/-/buscar/dou?q=${encodeURIComponent('"' + nome + '"')}&s=todos&exactDate=all&sortType=0`, { navegador: false, timeout: 40000 });
   const bloco = (String(r.texto).match(/<script[^>]+id="_br_com_seatecnologia_in_buscadou_BuscaDouPortlet_params"[^>]*>([\s\S]*?)<\/script>/) || [])[1];
   let lista_ = [];
@@ -2024,6 +2031,12 @@ export const TRANSFORMACOES = [
   { id: 'internetdb', de: ['ip'], nome: 'Portas abertas e vulnerabilidades', fonte: 'Shodan InternetDB', rapida: true, run: internetdb },
   { id: 'mesmo-ip', de: ['ip'], nome: 'Domínios no mesmo IP (DNS passivo e reverso)', fonte: 'AlienVault OTX + HackerTarget', run: mesmoIP },
   { id: 'ip-reputacao', de: ['ip'], nome: 'Reputação: varredura, listas de ameaça, Tor, spam, Spamhaus', fonte: 'GreyNoise, SANS ISC, Tor, StopForumSpam, Spamhaus', rapida: true, run: ipReputacao },
+  { id: 'nuvem', de: ['ip'], nome: 'Nuvem, CDN ou robô: AWS, Google, Azure, Cloudflare, Oracle, Googlebot, Bingbot…', fonte: 'faixas oficiais dos provedores', rapida: true, run: nuvem },
+  { id: 'listas-ameaca', de: ['ip'], nome: 'Listas de bloqueio e ameaça (IPsum, FireHOL, Emerging Threats, DNSBLs, Spamhaus ASN-DROP)', fonte: 'listas abertas + DNS', rapida: true, run: listasAmeaca },
+  { id: 'proxy-vpn', de: ['ip'], nome: 'Proxy, VPN, Tor e tipo de rede', fonte: 'proxycheck.io (100 por dia)', run: proxyVpn },
+  { id: 'ip-historico', de: ['ip'], nome: 'Histórico do bloco: quem já anunciou, desde quando, alocação e RPKI', fonte: 'RIPEstat', run: ipHistorico },
+  { id: 'dns-passivo', de: ['ip'], nome: 'Domínios que já apontaram para o IP (DNS passivo, com datas)', fonte: 'Mnemonic + ip.thc.org', run: dnsPassivo },
+  { id: 'certificado-ip', de: ['ip'], nome: 'Certificado servido pelo IP na porta 443 (toca o alvo)', fonte: 'o próprio IP', run: certificadoIp },
   { id: 'urlscan', de: ['dominio', 'ip'], nome: 'Varreduras públicas (páginas, IPs, capturas de tela)', fonte: 'urlscan.io', run: urlscan },
   { id: 'rdap-ip', de: ['ip', 'rede'], nome: 'Dono do bloco (RDAP)', fonte: 'rdap.org', run: rdapIP },
   { id: 'asn-prefixos', de: ['asn'], nome: 'Prefixos anunciados', fonte: 'RIPEstat', run: asnPrefixos },
@@ -2046,7 +2059,7 @@ export const TRANSFORMACOES = [
   { id: 'parlamentar', de: ['pessoa'], nome: 'Parlamentar: mandatos, partidos, ocupações, comissões', fonte: 'Câmara (desde 1826) e Senado (desde 1946)', run: parlamentar },
   { id: 'sancoes', de: ['pessoa', 'organizacao'], nome: 'Listas de sanções (OFAC, ONU, União Europeia)', fonte: 'Tesouro dos EUA, ONU, UE', rapida: true, run: sancoes },
   { id: 'stf', de: ['pessoa'], nome: 'Processos no STF em que é parte', fonte: 'STF', run: stf },
-  { id: 'dou', de: ['pessoa'], nome: 'Atos no Diário Oficial da União (nomeações, punições, contratos)', fonte: 'Imprensa Nacional', run: dou },
+  { id: 'dou', de: ['pessoa', 'cnpj'], nome: 'Atos no Diário Oficial da União (nomeações, punições, contratos)', fonte: 'Imprensa Nacional', run: dou },
   { id: 'tcu', de: ['pessoa'], nome: 'Inabilitado para cargo público ou proibido de licitar', fonte: 'TCU', rapida: true, run: tcu },
   { id: 'offshore', de: ['pessoa'], nome: 'Possíveis menções em vazamentos de offshores', fonte: 'ICIJ Offshore Leaks', run: offshore },
   { id: 'autor', de: ['pessoa'], nome: 'Autor(a): bibliotecas nacionais e livros', fonte: 'VIAF + Open Library', run: autor },
@@ -2077,10 +2090,15 @@ export const TRANSFORMACOES = [
   { id: 'web', de: ['telefone', 'email', 'apelido', 'pessoa', 'cnpj', 'organizacao', 'dominio', 'cripto', 'hash'], nome: 'Procurar na web', fonte: 'DuckDuckGo (Bing de reserva)', run: web },
   { id: 'wikidata', de: ['organizacao'], nome: 'Site oficial, sede, donos e fundadores', fonte: 'Wikidata', rapida: true, run: wikidata },
   { id: 'cnpj', de: ['cnpj'], nome: 'Razão social, sócios, endereço, regime e matriz', fonte: 'Receita (BrasilAPI ou Minha Receita)', rapida: true, run: cnpj },
+  { id: 'pncp', de: ['cnpj'], nome: 'Contratos com o poder público (federal, estadual, municipal)', fonte: 'PNCP + Compras.gov', run: pncp },
+  { id: 'bndes', de: ['cnpj'], nome: 'Financiamentos do BNDES', fonte: 'BNDES', rapida: true, run: bndes },
+  { id: 'registro-br', de: ['cnpj'], nome: 'Domínios .br, blocos IP e ASN no registro.br', fonte: 'registro.br', rapida: true, run: registroBr },
+  { id: 'reguladores', de: ['cnpj'], nome: 'Registros em órgãos reguladores (CVM, Banco Central, ANEEL, ANTT, ANS)', fonte: 'CVM, BCB, ANEEL, ANTT, ANS', run: reguladores },
   { id: 'rastreador-sites', de: ['rastreador'], nome: 'Outros sites com o mesmo ID', fonte: 'HackerTarget (50 por dia)', rapida: true, run: rastreadorSites },
   { id: 'dorks', de: ['dominio', 'pessoa', 'email', 'telefone', 'apelido', 'cnpj', 'organizacao'], nome: 'Buscas prontas (dorks) para abrir no navegador', fonte: 'local', run: dorks },
   { id: 'cpf', de: ['cpf'], nome: 'Validar e ver a região fiscal', fonte: 'local', rapida: true, run: cpf },
   { id: 'cpf-tcu', de: ['cpf'], nome: 'Inabilitado para cargo público ou proibido de licitar', fonte: 'TCU', rapida: true, run: cpfTcu },
+  { id: 'sancoes-br', de: ['cpf', 'cnpj'], nome: 'Sanções e condenações no Brasil (CGU, TCU, IBAMA, trabalho escravo, improbidade, TCE-RS)', fonte: 'CGU, TCU, IBAMA, MTE, CNJ, TCE-RS', run: sancoesBr },
   { id: 'transparencia', de: ['cpf', 'cnpj'], nome: 'Sanções, PEP, servidor federal e contratos com o governo', fonte: 'Portal da Transparência (chave gratuita no Cofre)', cofre: 'bluetego.transparencia', run: transparencia },
   { id: 'cep', de: ['cep'], nome: 'Endereço e coordenadas', fonte: 'BrasilAPI', rapida: true, run: cep },
   { id: 'coordenadas', de: ['local'], nome: 'Coordenadas e mapa', fonte: 'OpenStreetMap', rapida: true, run: coordenadas },

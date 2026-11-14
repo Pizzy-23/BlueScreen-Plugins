@@ -63,8 +63,8 @@ caso('sem chave no Cofre: pede a chave (código cofre) em vez de falhar calado',
 });
 caso('CPF: nada de dono — nenhuma transformação de CPF consulta cadastro, web ou dorks; o primeiro olhar não usa o Cofre', () => {
   const deCpf = TRANSFORMACOES.filter((t) => t.de.includes('cpf')).map((t) => t.id).sort();
-  assert.deepEqual(deCpf, ['cpf', 'cpf-tcu', 'transparencia']);
-  assert.deepEqual(INICIO.cpf.map((p) => p.t), ['cpf', 'cpf-tcu']);
+  assert.deepEqual(deCpf, ['cpf', 'cpf-tcu', 'sancoes-br', 'transparencia']);
+  assert.deepEqual(INICIO.cpf.map((p) => p.t), ['cpf', 'cpf-tcu', 'sancoes-br']);
 });
 
 await Promise.all(pendentes);

@@ -33,10 +33,14 @@ export const INICIO = {
   ip: [
     { t: 'ptr', max: 1, lim: 2 }, { t: 'ip-asn', max: 1, lim: 2 }, { t: 'geo', max: 1, lim: 2 }, { t: 'ip-reputacao', max: 1, lim: 3 },
     { t: 'internetdb', max: 1, lim: 8 }, { t: 'otx', max: 1, tipos: ['ip'], so: [] },
+    { t: 'nuvem', max: 1, lim: 2 }, { t: 'listas-ameaca', max: 1, lim: 1 }, { t: 'proxy-vpn', max: 1, lim: 1 },
   ],
-  cnpj: [{ t: 'cnpj', max: 1, lim: 12 }],
+  cnpj: [
+    { t: 'cnpj', max: 1, lim: 12 }, { t: 'sancoes-br', max: 1, tipos: ['cnpj'], lim: 4 }, { t: 'reguladores', max: 1, lim: 4 }, { t: 'bndes', max: 1, lim: 1 }, { t: 'registro-br', max: 1, so: [] },
+    { t: 'pncp', max: 1, lim: 5 }, { t: 'dou', max: 1, tipos: ['cnpj'], lim: 3, so: ['url'] },
+  ],
   // CPF: só o que é público por lei (validade, região fiscal, condenação no TCU); nunca o dono
-  cpf: [{ t: 'cpf', max: 1 }, { t: 'cpf-tcu', max: 1 }],
+  cpf: [{ t: 'cpf', max: 1 }, { t: 'cpf-tcu', max: 1 }, { t: 'sancoes-br', max: 1, tipos: ['cpf'], lim: 4 }],
   organizacao: [{ t: 'wikidata', max: 1, lim: 8 }, { t: 'sancoes', max: 1, tipos: ['organizacao'] }],
 };
 

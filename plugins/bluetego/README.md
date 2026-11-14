@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.9.0 |
+| **Versão** | 0.10.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 93 transformações usam fontes públicas e gratuitas. VirusTotal, Portal da Transparência, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 104 transformações usam fontes públicas e gratuitas. VirusTotal, Portal da Transparência, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -112,6 +112,12 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Domínio | Domínios parecidos registrados (letra trocada, final diferente, palavra a mais, até 260 variações) | DNS |
 | IP | ⚡ DNS reverso · ⚡ sistema autônomo e prefixo (Team Cymru de reserva) · ⚡ localização e provedor (aproximada) | DNS, RIPEstat, Team Cymru, ipwho.is |
 | IP | ⚡ Reputação: varre a internet? (GreyNoise), em quais listas de ameaça está e quem cuida de abuso (SANS ISC), relay do Tor, spam (StopForumSpam), rede de criminosos (Spamhaus DROP) | GreyNoise, SANS ISC, Tor Onionoo, StopForumSpam, Spamhaus |
+| IP | ⚡ De qual nuvem, CDN ou robô é (AWS com serviço e região, Google, Google Cloud, Azure, Cloudflare, Oracle, Fastly, DigitalOcean, Linode, Vultr; Googlebot, Bingbot e GPTBot verificados pela faixa oficial) | faixas publicadas pelos provedores |
+| IP | ⚡ Listas de bloqueio e ameaça: quantas listas citam o IP (IPsum), ataques nas últimas 48 h (FireHOL), comprometidos (Emerging Threats), 7 DNSBLs com o motivo, rede de criminosos (Spamhaus ASN-DROP e DROP v6) | IPsum, FireHOL, Emerging Threats, DNSBLs, Spamhaus |
+| IP | Proxy, VPN, Tor, tipo de rede e ataques vistos | proxycheck.io |
+| IP | Histórico do bloco: quem anuncia, desde quando, quem já anunciou antes, alocação no RIR e RPKI (inválido vira alerta) | RIPEstat |
+| IP | Domínios que já apontaram para o IP, com datas, e os de agora | Mnemonic PassiveDNS, ip.thc.org |
+| IP | Certificado servido na porta 443: nomes, organização, emissor, impressão digital (toca o alvo) | o próprio IP |
 | IP | ⚡ Portas abertas e vulnerabilidades | Shodan InternetDB |
 | IP | Domínios que apontam ou já apontaram para o IP (DNS passivo e reverso) | AlienVault OTX + HackerTarget |
 | IP, rede | Dono do bloco (RDAP) | rdap.org |
@@ -142,9 +148,14 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Pessoa | E-mails prováveis nos domínios ligados à pessoa, confirmados no Gravatar | DNS + Gravatar |
 | Pessoa | Pesquisador com o nome e a instituição · contas do GitHub com o nome · artigos da Wikipédia · apelidos prováveis | ORCID, GitHub, Wikipédia, local |
 | Organização | ⚡ Site oficial, sede, donos, fundadores · artigos da Wikipédia | Wikidata, Wikipédia |
-| CNPJ | ⚡ Razão social, nome fantasia, sócios (empresas sócias viram CNPJ), endereço, CEP, telefone, e-mail, regime (Simples, MEI), atividades, matriz da filial | Receita (BrasilAPI, com a Minha Receita de reserva) |
+| CNPJ | ⚡ Razão social, nome fantasia, sócios (empresas sócias viram CNPJ), endereço, CEP, telefone, e-mail, regime (Simples, MEI) com a tributação ano a ano e as datas de entrada e saída do Simples e do MEI, atividades, matriz da filial | Receita (BrasilAPI, com a Minha Receita de reserva) |
+| CNPJ | Contratos com o poder público em todas as esferas (quem contratou a empresa e quem ela contratou, com valores) e o cadastro de fornecedor federal | PNCP, Compras.gov |
+| CNPJ | ⚡ Financiamentos do BNDES · ⚡ quantos domínios .br, blocos IP e ASN a empresa tem no registro.br | BNDES, registro.br |
+| CNPJ | Registros em órgãos reguladores: companhia aberta (com a auditora), instituição do Banco Central, geradora de energia, transportadora (RNTRC), operadora de plano de saúde | CVM, Banco Central, ANEEL, ANTT, ANS |
+| CNPJ, pessoa | Atos no Diário Oficial da União (por CNPJ: registros da ANVISA, extratos de contrato, notificações) | Imprensa Nacional |
 | CPF | ⚡ Validar e ver a região fiscal de emissão · ⚡ inabilitado para cargo público ou proibido de licitar | local, TCU |
 | CPF, CNPJ | Verificação de integridade: sanções (CEIS, CNEP), expulsão da administração federal (CEAF), pessoa politicamente exposta, servidor federal e contratos com o governo federal (PEP, servidor e CEAF só para CPF) | Portal da Transparência (chave gratuita no Cofre) |
+| CPF, CNPJ | Sanções e condenações publicadas no Brasil, sem chave: CEIS e CNEP (arquivos do Portal da Transparência), contas julgadas irregulares (TCU), autos de infração e áreas embargadas (IBAMA), lista suja do trabalho escravo (MTE), condenações por improbidade (CNJ) e, para CPF, contas irregulares no TCE-RS | CGU, TCU, IBAMA, MTE, CNJ, TCE-RS |
 | CEP | ⚡ Endereço e coordenadas | BrasilAPI |
 | Telefone | ⚡ Tipo (celular, fixo, 0800, 4004), estado e região pelo DDD, operadora original da faixa, cidade do fixo pelo prefixo, os jeitos de escrever (inclusive o formato antigo de 8 dígitos do celular), links do WhatsApp, Telegram e Signal | local + libphonenumber |
 | Telefone | Organização que publica este telefone · estabelecimento com este telefone no mapa (nome, endereço, site, e-mail; leva até 1 minuto) | Wikidata, OpenStreetMap (Overpass) |
@@ -202,9 +213,10 @@ Aba Plugins › engrenagem do Bluetego:
 
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
 - **CPF:** o Bluetego valida o CPF, mostra a região fiscal de emissão, cruza com o CPF mascarado que a Receita publica dos sócios e faz a verificação de integridade que compliance e due diligence fazem: condenação no TCU e, com a chave do Portal da Transparência, sanções, expulsões, PEP, servidor federal e contratos com o governo. O nome só aparece quando a própria fonte oficial o publica junto do CPF (condenado, sancionado, servidor, PEP). Ele **não** descobre de quem é um CPF: não consulta cadastro de pessoa física (nome, endereço, telefone) nem benefícios sociais, não usa bases vazadas e não procura CPF na web. Dado pessoal é protegido pela LGPD, e consulta de dono de CPF é a ferramenta de quem aplica golpe.
+- **Listas que só publicam o CPF mascarado ficam de fora por CPF** (Banco Central, PGFN, PEP): a máscara casa com cerca de mil pessoas, e cruzar por ela seria descobrir o dono do CPF. Pelo mesmo motivo, o Bluetego não busca empresas pela máscara do CPF do sócio.
 - **Chave do Portal da Transparência:** gratuita, tirada com o e-mail em portaldatransparencia.gov.br/api-de-dados/cadastrar-email e guardada no Cofre da IDE (`bluetego.transparencia`). Sem ela, a transformação pede a chave.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
-- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). A numeração de telefones vem do libphonenumber do Google (Apache-2.0, em `vendor/libphonenumber`), os dados do mapa são do OpenStreetMap (ODbL, © colaboradores do OpenStreetMap) e o Wikidata é CC0. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
+- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. Os dados do IBAMA são ODbL, os do TCE-RS são CC BY, o IPsum é de domínio público (Unlicense) e os dados do registro.br não podem ser redistribuídos nem usados comercialmente. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). A numeração de telefones vem do libphonenumber do Google (Apache-2.0, em `vendor/libphonenumber`), os dados do mapa são do OpenStreetMap (ODbL, © colaboradores do OpenStreetMap) e o Wikidata é CC0. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
 - **E-mail escondido não é revelado:** o Launchpad acha a conta de um e-mail mesmo quando o dono escolheu escondê-lo, e por isso o Bluetego só consulta o Launchpad por nome e apelido. Nome em chave PGP do keyserver.ubuntu.com é autodeclarado (qualquer um publica uma chave com qualquer nome), e a ligação diz isso.
 - **Nome completo e homônimos:** as fontes de nome só consultam com nome e sobrenome e só aceitam um resultado quando todas as palavras do nome aparecem nele (em qualquer ordem, sem acento). Processo, ato do Diário Oficial, sanção e menção em vazamento continuam podendo ser de um homônimo: a ligação diz isso, e as propriedades trazem o que serve para conferir (nascimento, município, cargo, trecho).
 - **CPF do TCU é descartado:** a lista de inabilitados e inidôneos do TCU publica o CPF completo; o Bluetego não mostra, não guarda e não cria entidade com ele.
@@ -242,6 +254,9 @@ node tests/bugs.test.mjs
 node tests/raciocinio.test.mjs
 node tests/inicio.test.mjs
 node tests/integridade.test.mjs
+node tests/empresa.test.mjs
+node tests/sancoes-br.test.mjs
+node tests/ip.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -251,6 +266,20 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.10.0
+
+- **CPF e CNPJ, sanções sem chave:** CEIS e CNEP (os arquivos do Portal da Transparência, abertos sem dependência), contas julgadas irregulares no TCU, autos de infração e áreas embargadas do IBAMA, a lista suja do trabalho escravo, as condenações por improbidade do CNJ e, para CPF, as contas irregulares do TCE-RS. O nome só aparece quando a própria lista o publica junto do documento. Entra no primeiro olhar do CPF e do CNPJ.
+- **Pegada da empresa pelo CNPJ:** contratos com o poder público em todas as esferas (PNCP) e o cadastro de fornecedor federal, financiamentos do BNDES, domínios e blocos IP no registro.br, registros na CVM (com a auditora), no Banco Central, na ANEEL, na ANTT e na ANS, Diário Oficial pelo CNPJ e a tributação ano a ano com as datas do Simples e do MEI.
+- **IP:**
+  - de qual nuvem, CDN ou robô ele é, pelas faixas oficiais (AWS com serviço e região, Google, Azure, Cloudflare, Oracle e outros; Googlebot, Bingbot e GPTBot verificados);
+  - listas de bloqueio e ameaça (IPsum, FireHOL, Emerging Threats, 7 DNSBLs com o motivo, Spamhaus ASN-DROP);
+  - proxy, VPN e tipo de rede;
+  - histórico do bloco (quem já anunciou, desde quando, RPKI);
+  - DNS passivo com datas;
+  - o certificado servido pelo IP.
+- Correções: uma conexão derrubada no meio (ECONNRESET) agora tenta de novo uma vez antes de o site ser dado como fora do ar; o resultado de uma fonte não apaga mais o "risco" de outra (cada uma tem a sua propriedade).
+- Ficaram de fora, com motivo: listas com CPF mascarado (Banco Central, PGFN, PEP), a busca de empresas pela máscara do CPF do sócio (identificaria o dono do CPF), a busca por sócio do Minha Receita (voltava vazia até para sócios que existem), ip-api.com (só uso não comercial), a lista do iCloud Private Relay (12 MB) e o INPI e a Anvisa (arquivos de gigabytes).
 
 ### 0.9.0
 

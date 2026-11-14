@@ -86,6 +86,6 @@ export async function transparencia(ctx, valor, tipo) {
   if (ehCpf) { props['expulsões (CEAF)'] = conta('CEAF'); props['pessoa politicamente exposta'] = por.PEP && por.PEP.length ? 'sim' : conta('PEP'); props['servidor federal'] = por.servidor && por.servidor.length ? 'sim' : conta('servidor'); }
   props['contratos com o governo federal'] = conta('contratos');
   const alerta = out.some((e) => e.alerta);
-  if (alerta) props.risco = 'consta em lista de sanção ou expulsão do governo federal';
+  if (alerta) props['alerta do Portal da Transparência'] = 'consta em lista de sanção ou expulsão do governo federal';
   return { entidades: unicos(out), alerta, props };
 }

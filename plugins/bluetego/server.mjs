@@ -44,6 +44,8 @@ async function pedir(url, opt = {}) {
     return r;
   } catch (e) {
     const codigo = (e.cause && e.cause.code) || e.code || '';
+    // conexão derrubada no meio (o PNCP faz isso de vez em quando): uma nova tentativa antes de dar o site como fora
+    if (/ECONNRESET|UND_ERR_SOCKET/.test(codigo) && !opt.tentouDeNovo) return pedir(url, { ...opt, tentouDeNovo: true });
     if (e.name !== 'TimeoutError' && !DE_CONEXAO.test(codigo)) throw new Falha(`${host}: ${(e.cause && e.cause.message) || e.message || e}`, { status: 502 });
     const motivo = e.name === 'TimeoutError' ? `${host} demorou demais para responder.` : `Sem conexão com ${host}.`;
     // é por site: um subdomínio do alvo que não responde só pula a si mesmo
@@ -76,6 +78,14 @@ const ctxRede = {
   async post(url, dados, opt = {}) {
     const r = await pedir(url, { method: 'POST', timeout: opt.timeout || 30000, headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(dados) });
     return lerJson(r, new URL(url).host, opt);
+  },
+  // formulário (a consulta de improbidade do CNJ): devolve o texto no charset que o site declarar (ISO-8859-1 lá)
+  async form(url, corpoTexto, opt = {}) {
+    const r = await pedir(url, { method: 'POST', timeout: opt.timeout || 30000, headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', accept: '*/*' }, body: corpoTexto });
+    if (!r.ok) { descartar(r); throw new Falha(`${new URL(url).host} respondeu ${r.status}.`, { status: 502 }); }
+    const cs = (/charset=([\w-]+)/i.exec(r.headers.get('content-type') || '') || [])[1] || 'utf-8';
+    const buf = await r.arrayBuffer();
+    try { return new TextDecoder(cs).decode(buf); } catch { return new TextDecoder().decode(buf); }
   },
   // arquivo inteiro (documentos para ler os metadados), até "max" bytes: maior que isso, desiste sem baixar o resto
   async binario(url, opt = {}) {
