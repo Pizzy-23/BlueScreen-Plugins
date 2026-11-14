@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.7.0 |
+| **Versão** | 0.8.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -28,7 +28,7 @@ O que ele faz diferente do Maltego:
 
 O Bluetego aparece na barra da esquerda (ícone de grafo). Ele abre o grafo numa aba fixa e, na esquerda, a lista de investigações e os tipos de entidade no grafo.
 
-1. Escreva no campo **Investigar** (no topo) um domínio, IP, e-mail, `@apelido`, nome, CNPJ, CPF, CEP, telefone ou CVE, e `Enter`. O tipo é adivinhado pelo valor e as transformações rápidas já rodam (a entidade gira enquanto roda). Vários valores de uma vez também servem.
+1. Escreva no campo **Investigar** (no topo) um domínio, IP, e-mail, `@apelido`, nome, CNPJ, CPF, CEP, telefone ou CVE, e `Enter`. O tipo é adivinhado pelo valor e o **primeiro olhar** já roda: um roteiro curto para aquele tipo, com só o que importa (o que ficou de fora fica contado na entidade, e rodar a transformação de novo traz tudo). A entidade gira enquanto roda. Vários valores de uma vez também servem (aí rodam as transformações rápidas).
 2. Clique numa entidade: aparece uma **barra de ações** em cima dela (rápidas, transformar, máquinas, foco, recolher, abrir, remover) e os detalhes no painel da direita.
 3. Rode uma **máquina** (botão **Máquinas**, ou na barra da entidade) para várias transformações em sequência.
 4. Abra a aba **Análise** para as pistas e a IA.
@@ -238,6 +238,7 @@ node tests/telefones.test.mjs
 node tests/github.test.mjs
 node tests/bugs.test.mjs
 node tests/raciocinio.test.mjs
+node tests/inicio.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -247,6 +248,17 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.8.0
+
+- **Primeiro olhar:** ao inserir um valor, o Bluetego já roda um roteiro curto e escolhido para o tipo e mostra só o que importa:
+  - **pessoa:** Wikidata (cargos, nascimento, contas oficiais), mandatos, sanções, TCU, STF, Diário Oficial, Offshore Leaks, livros e quantas pessoas têm o nome;
+  - **telefone:** região, operadora original, organização ou estabelecimento com o número e onde ele aparece na web;
+  - **site:** IPs e provedor, dono no registro, contatos do site (telefone, WhatsApp, CNPJ, endereço, redes), a razão social e os sócios do CNPJ achado, tecnologias, quem atende o e-mail e a segurança do e-mail;
+  - também e-mail, apelido, IP, CNPJ, URL e organização.
+- **Sem lixo:** cada passo é podado (alertas sempre ficam e vêm primeiro; servidores de nomes, links de apps e listas longas saem), e o que ficou de fora vira só uma contagem na entidade: rodar a transformação de novo traz tudo. Fontes que trazem homônimos ou dezenas de itens soltos (busca na web por nome, apelidos adivinhados, centenas de sites, subdomínios) ficam para as máquinas.
+- Nome de pessoa e telefone com espaços ("+55 11 3003-5555") entram como um valor só; "3003-5555" depois de um DDD não vira um segundo telefone.
+- - O "Transformar" (barra flutuante e menu do botão direito) abre um painel próprio em vez do menu da IDE: com 30 ou mais transformações de nome longo, o menu saía da tela. O painel cabe sempre na janela, rola, filtra por nome ou fonte, anda com as setas (Enter roda, Esc fecha) e mostra primeiro as que ainda não rodaram.
 
 ### 0.7.0
 

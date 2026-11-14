@@ -200,7 +200,7 @@ export function extrair(texto, limite = 500) {
     if (!m[0].includes('(') && /^(19|20)\d\d$/.test(m[2]) && /^(19|20)\d\d$/.test(m[3])) continue;
     const t = telefoneBR(m[1].replace(/^0/, '') + m[2] + m[3]); if (t && /[()\s.-]/.test(m[0])) por('telefone', t);
   }
-  for (const m of s.matchAll(/(?<![\w/])0(800|300|500|900)[\s.-]?\d{3}[\s.-]?\d{3,4}\b|(?<![\w/])[34]00[0-9][\s.-]\d{4}\b/g)) por('telefone', m[0]);
+  for (const m of s.matchAll(/(?<![\w/])0(800|300|500|900)[\s.-]?\d{3}[\s.-]?\d{3,4}\b|(?<![\w/])(?<!\d\)?[\s.-])[34]00[0-9][\s.-]\d{4}\b/g)) por('telefone', m[0]);
   return out;
 }
 

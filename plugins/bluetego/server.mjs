@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { TIPOS, detectar, extrair, normalizar, chave, tipoValido } from './lib/entidades.mjs';
 import { TRANSFORMACOES, rodar, Falha } from './lib/transformacoes.mjs';
 import { MAQUINAS } from './lib/maquinas.mjs';
+import { INICIO, podar } from './lib/inicio.mjs';
 import { pensar } from './lib/pistas.mjs';
 import { montarPedido, lerResposta } from './lib/ia.mjs';
 
@@ -168,6 +169,7 @@ rota('catalogo', () => ({
   tipos: TIPOS,
   transformacoes: TRANSFORMACOES.map(({ id, de, nome, fonte, rapida, cofre }) => ({ id, de, nome, fonte, rapida: !!rapida, cofre: cofre || '' })),
   maquinas: MAQUINAS,
+  inicio: INICIO,
 }));
 rota('transformar', async (b) => {
   const lim = await limite();
@@ -180,10 +182,12 @@ rota('transformar', async (b) => {
   const extra = b.t === 'emails-provaveis' ? JSON.stringify(vizinhos) : b.tipo === 'texto' && b.completo ? crypto.createHash('sha1').update(String(b.completo)).digest('hex') : b.t === 'contas-amplo' ? String(sitesAmplo) : '';
   const k = [b.t, b.tipo, b.valor, lim, extra].join('|');
   const guardada = CACHE.get(k);
-  if (guardada && Date.now() - guardada.em < VALIDADE && !b.deNovo) return { ...guardada.v, guardada: true };
+  // o primeiro olhar pede o resultado podado (só o que importa); o cache guarda sempre o inteiro
+  const poda = b.poda && typeof b.poda === 'object' ? { lim: Number.isFinite(b.poda.lim) ? b.poda.lim : undefined, so: Array.isArray(b.poda.so) ? b.poda.so.map(String) : undefined } : null;
+  if (guardada && Date.now() - guardada.em < VALIDADE && !b.deNovo) return podar({ ...guardada.v, guardada: true }, poda);
   const r = await rodar(String(b.t || ''), String(b.tipo || ''), String(b.valor || ''), { ...ctxRede, limite: lim, vizinhos, sitesAmplo }, b.completo);
   lembrar(k, r);
-  return r;
+  return podar(r, poda);
 });
 rota('extrair', (b) => ({ entidades: extrair(String(b.texto || '')).filter((e) => e.tipo !== 'texto').map((e) => ({ ...e, id: chave(e.tipo, e.valor) })) }));
 // o que a pessoa digitou: o tipo (o escolhido ou o adivinhado), o valor na forma canônica e o id

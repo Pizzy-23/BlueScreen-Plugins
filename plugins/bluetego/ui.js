@@ -294,7 +294,7 @@ function enfileirar(tId, nos, opt = {}) {
   if (!alvos.length) return Promise.resolve([]);
   if (!F.ativos && !F.fila.length) { F.total = 0; F.feitos = 0; F.erros = []; F.cancelar = false; lembrar(); }
   F.total += alvos.length;
-  const promessas = alvos.map((n) => new Promise((ok) => F.fila.push({ t, n, ok, deNovo: !!opt.deNovo })));
+  const promessas = alvos.map((n) => new Promise((ok) => F.fila.push({ t, n, ok, deNovo: !!opt.deNovo, poda: opt.poda })));
   bombear();
   pintarFila();
   return Promise.all(promessas).then((l) => l.flat());
@@ -307,16 +307,18 @@ function bombear() {
     rodarJob(job).finally(() => { F.ativos--; F.feitos++; pintarFila(); bombear(); if (!F.ativos && !F.fila.length) terminouFila(); });
   }
 }
-async function rodarJob({ t, n, ok, deNovo }) {
+async function rodarJob({ t, n, ok, deNovo, poda }) {
   V.ocupados.set(n.id, (V.ocupados.get(n.id) || 0) + 1);
   animar();
   try {
     // as entidades ligadas vão junto: algumas transformações usam (os e-mails prováveis saem dos domínios ligados à pessoa)
     const viz = [...vizinhos(n.id)].map((id) => G.nos.get(id)).filter(Boolean).slice(0, 40).map((x) => ({ tipo: x.tipo, valor: x.valor }));
-    const r = await chamar('transformar', { t: t.id, tipo: n.tipo, valor: n.valor, completo: n.tipo === 'texto' ? n.props.completo || n.valor : undefined, deNovo, vizinhos: viz });
-    if (!r.guardada) aprender(n.tipo, t.id, (r.entidades || []).length);
+    const r = await chamar('transformar', { t: t.id, tipo: n.tipo, valor: n.valor, completo: n.tipo === 'texto' ? n.props.completo || n.valor : undefined, deNovo, vizinhos: viz, poda });
+    if (!r.guardada) aprender(n.tipo, t.id, (r.entidades || []).length + (r.podados || 0));
     if (!G.nos.has(n.id)) return ok([]);
     const novos = aplicar(n, t.id, r);
+    // o primeiro olhar deixou de fora o menos importante: fica a conta na entidade, e rodar de novo traz tudo
+    if (r.podados) n.props[`mais em "${curto(t.nome, 40)}"`] = `${r.podados} ${r.podados === 1 ? 'resultado guardado' : 'resultados guardados'}: rode de novo para ver`;
     // muitos resultados soltos de uma vez: entram recolhidos no "+N" da entidade, sem soterrar o grafo
     const soltos = novos.filter((id) => vizinhos(id).size === 1).length;
     if (soltos >= 25 && !n.recolher) { n.recolher = true; sujar(); toast(`${soltos} resultados de ${curto(rotuloDe(n), 30)} ficaram recolhidos: clique no +${soltos} para abrir`); }
@@ -348,6 +350,12 @@ function terminouFila() {
   if (F.erros.length || pulos) toast([F.erros.length === 1 ? F.erros[0] : F.erros.length ? `${F.erros.length} transformações falharam.` : '', pulos ? `${pulos} consultas puladas (site fora do ar).` : '', 'Veja no histórico.'].filter(Boolean).join(' '), 'err');
   pintarFila(); mudou();
 }
+// ao inserir um valor: o roteiro curto do tipo (lib/inicio.mjs), com o resultado podado; sem roteiro, as rápidas
+function primeiroOlhar(n) {
+  const passos = CAT.inicio && CAT.inicio[n.tipo];
+  if (!passos || F.maquina) return rapidas([n]);
+  rodarMaquina({ nome: 'Primeiro olhar', passos }, n);
+}
 function rapidas(nos) {
   const ts = new Set();
   for (const n of nos) for (const t of paraTipo(n.tipo)) if (t.rapida) ts.add(t.id);
@@ -376,7 +384,7 @@ async function rodarMaquina(m, semente) {
       if (m.escopo && semente.tipo === 'dominio') { const b = baseDominio(semente.valor), antes = alvos.length; alvos = alvos.filter((n) => n.tipo !== 'dominio' || baseDominio(n.valor) === b); if (antes > alvos.length) F.foraDoEscopo = (F.foraDoEscopo || 0) + antes - alvos.length; }
       if (p.max) alvos = alvos.slice(0, p.max);
       alvos.forEach((n) => feitas.add(p.t + '|' + n.id));
-      const ids = await enfileirar(p.t, alvos);
+      const ids = await enfileirar(p.t, alvos, p.lim != null || p.so ? { poda: { lim: p.lim, so: p.so } } : {});
       for (const id of ids) if (!daMaquina.has(id)) { daMaquina.add(id); novas++; }
       if (novas > 600) { toast('A máquina parou: mais de 600 entidades novas'); break; }
     }
@@ -981,7 +989,7 @@ function montarAcoes(n) {
     const r = b.getBoundingClientRect(), ev = { preventDefault() {}, stopPropagation() {}, clientX: r.left, clientY: r.bottom + 4 };
     const ac = b.dataset.ac;
     if (ac === 'rapidas') rapidas([n]);
-    if (ac === 'transformar') bs.showMenu(ev, itensTransformacoes([n]), `Transformar ${curto(rotuloDe(n), 36)}`);
+    if (ac === 'transformar') escolherTransformacao(ev, [n], `Transformar ${curto(rotuloDe(n), 36)}`);
     if (ac === 'maquina') bs.showMenu(ev, maqs.map((m) => ({ label: m.nome, icon: IC.engrenagem, action: () => rodarMaquina(m, n) })), 'Máquinas');
     if (ac === 'foco') focar(n, 2);
     if (ac === 'recolher') recolher(n, !n.recolher);
@@ -1200,6 +1208,55 @@ function itensTransformacoes(sel) {
   const ts = CAT.transformacoes.filter((t) => t.de.some((d) => tipos.includes(d)));
   return ts.map((t) => ({ label: `${sel.length === 1 && sel[0].feitas.includes(t.id) ? '✓ ' : ''}${t.nome} · ${t.fonte}`, icon: t.rapida ? IC.raio : IC.maquina, action: () => enfileirar(t.id, sel, { deNovo: sel.length === 1 && sel[0].feitas.includes(t.id) }) }));
 }
+// escolher a transformação: um painel próprio (o menu da IDE não rola e, com 30+ opções longas, saía da tela).
+// Cabe sempre na janela, tem filtro por nome ou fonte, rola, e anda com as setas; Enter roda, Esc fecha.
+function escolherTransformacao(ev, sel, titulo) {
+  document.querySelector('.btg-pop')?.remove();
+  const tipos = [...new Set(sel.map((n) => n.tipo))];
+  const um = sel.length === 1 ? sel[0] : null;
+  const ts = CAT.transformacoes.filter((t) => t.de.some((d) => tipos.includes(d)))
+    .map((t) => ({ t, feita: !!(um && um.feitas.includes(t.id)) }))
+    .sort((a, b) => Number(a.feita) - Number(b.feita) || Number(b.t.rapida) - Number(a.t.rapida));
+  const pop = document.createElement('div');
+  pop.className = 'btg-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', titulo);
+  pop.innerHTML = `<div class="btg-pop-cab"><b>${esc(titulo)}</b><span>${ts.length}</span></div>
+    <input class="btg-pop-filtro" placeholder="Filtrar por nome ou fonte…" aria-label="Filtrar transformações">
+    <div class="btg-pop-lista" role="listbox"></div>`;
+  document.body.appendChild(pop);
+  const lista = pop.querySelector('.btg-pop-lista'), filtro = pop.querySelector('input');
+  let vis = [], ativo = 0;
+  const pinta = () => {
+    const q = filtro.value.trim().toLowerCase();
+    vis = ts.filter(({ t }) => !q || (t.nome + ' ' + t.fonte).toLowerCase().includes(q));
+    ativo = Math.min(ativo, Math.max(0, vis.length - 1));
+    lista.innerHTML = vis.length ? vis.map(({ t, feita }, i) => `<button class="btg-pop-it${i === ativo ? ' ativo' : ''}${feita ? ' feita' : ''}" data-i="${i}" role="option" aria-selected="${i === ativo}">${t.rapida ? IC.raio : IC.maquina}<span class="btg-pop-n">${esc(t.nome)}${feita ? ' <em>já rodou</em>' : ''}</span><span class="btg-pop-f">${esc(t.fonte)}</span></button>`).join('') : '<p class="btg-mudo">Nenhuma transformação com esse texto.</p>';
+  };
+  const fechar = () => { pop.remove(); document.removeEventListener('mousedown', fora, true); };
+  const fora = (e) => { if (!pop.contains(e.target)) fechar(); };
+  const rodar = (i) => { const x = vis[i]; if (!x) return; fechar(); enfileirar(x.t.id, sel, { deNovo: x.feita }); };
+  pinta();
+  // posição: perto de onde abriu, sempre inteiro dentro da janela
+  const w = Math.min(380, innerWidth - 16), h = Math.min(pop.offsetHeight, innerHeight - 16, Math.max(320, innerHeight * 0.6));
+  pop.style.width = w + 'px';
+  pop.style.maxHeight = h + 'px';
+  pop.style.left = Math.max(8, Math.min(ev.clientX, innerWidth - w - 8)) + 'px';
+  pop.style.top = Math.max(8, Math.min(ev.clientY, innerHeight - pop.offsetHeight - 8)) + 'px';
+  filtro.oninput = () => { ativo = 0; pinta(); };
+  filtro.onkeydown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      ativo = Math.max(0, Math.min(vis.length - 1, ativo + (e.key === 'ArrowDown' ? 1 : -1)));
+      pinta();
+      lista.querySelector('.ativo')?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') { e.preventDefault(); rodar(ativo); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(); }
+  };
+  lista.onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) rodar(Number(b.dataset.i)); };
+  setTimeout(() => document.addEventListener('mousedown', fora, true));
+  filtro.focus();
+}
 function menuEntidades(e) {
   const sel = selecionadas();
   if (!sel.length) return;
@@ -1207,7 +1264,7 @@ function menuEntidades(e) {
   const maqs = um ? CAT.maquinas.filter((m) => m.de === um.tipo) : [];
   const itens = [
     { label: 'Rodar as rápidas', icon: IC.raio, k: 'Enter', action: () => rapidas(sel) },
-    { label: 'Transformações', icon: IC.maquina, sub: itensTransformacoes(sel) },
+    { label: 'Transformações…', icon: IC.maquina, action: () => escolherTransformacao(e, sel, um ? `Transformar ${curto(rotuloDe(um), 36)}` : `Transformar ${sel.length} entidades`) },
   ];
   if (maqs.length) itens.push({ label: 'Máquinas', icon: IC.maquina, sub: maqs.map((m) => ({ label: m.nome, action: () => rodarMaquina(m, um) })) });
   itens.push('-');
@@ -1467,7 +1524,7 @@ function montar(el) {
   el.innerHTML = `
     <div class="btg-barra">
       <input class="btg-nome" data-nome spellcheck="false" title="Nome da investigação">
-      <label class="btg-investigar" title="Escreva um domínio, IP, e-mail, @apelido, CNPJ, CVE... e Enter: entra no grafo e as transformações rápidas já rodam. Vários de uma vez também (separe por espaço ou vírgula).">${IC.raio}<input data-rapido placeholder="Investigar: domínio, IP, e-mail…" spellcheck="false" aria-label="Investigar um valor (Enter)"><kbd>Enter</kbd></label>
+      <label class="btg-investigar" title="Escreva um domínio, IP, e-mail, @apelido, CNPJ, CVE... e Enter: entra no grafo e o primeiro olhar já traz o que importa (só o útil; o resto fica contado na entidade). Vários de uma vez também (separe por espaço ou vírgula).">${IC.raio}<input data-rapido placeholder="Investigar: domínio, IP, e-mail…" spellcheck="false" aria-label="Investigar um valor (Enter)"><kbd>Enter</kbd></label>
       <button class="icon-btn" data-a="adicionar" title="Adicionar escolhendo o tipo (N: nova ligada à escolhida)">${IC.mais}</button>
       <button class="chip" data-a="colar" title="Colar um texto e extrair as entidades (ou Ctrl+V direto no grafo)">${IC.colar}<span>Colar</span></button>
       <button class="chip" data-a="maquinas" title="Roteiros de transformações">${IC.engrenagem}<span>Máquinas</span></button>
@@ -1581,14 +1638,18 @@ function contarBusca() {
   el.classList.toggle('zero', !n);
   el.title = n ? `${n} ${n === 1 ? 'entidade achada' : 'entidades achadas'}: Enter escolhe ${n === 1 ? 'ela' : 'todas'}` : 'Nenhuma entidade visível casa com a busca';
 }
-// o campo Investigar: um valor entra e roda as rápidas; vários viram entidades de uma vez
+// o campo Investigar: um valor entra e ganha o primeiro olhar; vários viram entidades de uma vez (e rodam as rápidas)
 async function investigarRapido(texto, origem) {
   const t = String(texto || '').trim();
   if (!t) return;
   try {
-    if (!/[\s,;]/.test(t) && t.length < 300) { const n = await adicionarValor(t); if (n && !n.feitas.length) rapidas([n]); return; }
+    // um valor só (inclusive nome de pessoa e telefone com espaços): entra e ganha o primeiro olhar
+    const um = async (v, tp) => { const n = await adicionarValor(v, tp); if (n && !n.feitas.length) primeiroOlhar(n); };
+    if (!/[\s,;]/.test(t) && t.length < 300) return um(t);
     const lista = (await chamar('extrair', { texto: t })).entidades;
-    if (!lista.length) { if (t.length < 300) { const n = await adicionarValor(t); if (n) rapidas([n]); } else toast('Nenhuma entidade reconhecida no texto'); return; }
+    if (!lista.length) { if (t.length < 300) await um(t); else toast('Nenhuma entidade reconhecida no texto'); return; }
+    const so = (s) => s.replace(/[\s().+-]/g, '');
+    if (lista.length === 1 && so(t).length <= so(lista[0].valor).length + 2) return um(lista[0].valor, lista[0].tipo);
     if (lista.length > 12 || origem) return dlgColar(t, origem);
     adicionarVarias(lista);
     historico(`Investigar: ${lista.length} entidades`);
@@ -1732,7 +1793,7 @@ function trocarAba(aba) {
 }
 function dlgAtalhos() {
   const linhas = [
-    ['Enter no campo Investigar', 'põe a entidade no grafo e roda as rápidas'], ['Ctrl+V no grafo', 'investiga o que foi copiado (um valor ou um texto inteiro)'], ['Arrastar um arquivo', 'extrai as entidades dele'],
+    ['Enter no campo Investigar', 'põe a entidade no grafo e traz o primeiro olhar (só o que importa)'], ['Ctrl+V no grafo', 'investiga o que foi copiado (um valor ou um texto inteiro)'], ['Arrastar um arquivo', 'extrai as entidades dele'],
     ['Duplo clique', 'na entidade: rodar as rápidas · no fundo: adicionar'], ['Enter', 'rodar as rápidas na seleção'], ['Botão direito', 'transformações, máquinas, ligar, foco, cores; numa ligação: mudar ou remover'],
     ['L ou Alt + arrastar', 'ligar a entidade escolhida a outra'], ['N', 'nova entidade ligada à escolhida'], ['.', 'só a vizinhança da escolhida (de novo: mais um salto)'],
     ['C', 'recolher ou abrir os resultados soltos'], ['1 a 5', 'forças, hierárquico, radial, por tipo, círculo'], ['Setas', 'andar para a entidade vizinha'],
@@ -1969,12 +2030,12 @@ function pintarVazio() {
   R.vazio.innerHTML = `<div class="btg-vazio-c">
     <div class="btg-vazio-ic">${ICON}</div>
     <h3>Comece por uma entidade</h3>
-    <p>Um domínio, um IP, um e-mail, um apelido, um CVE. Enter põe no grafo e já roda as transformações rápidas; depois escolha uma entidade para ver as outras transformações (ou use o botão direito).</p>
+    <p>Um nome completo, um telefone, um site, um e-mail, um apelido, um IP, um CNPJ. Enter põe no grafo e já traz o primeiro olhar: só o que importa, sem lixo; depois escolha uma entidade para ver as outras transformações (ou use o botão direito).</p>
     <div class="btg-comeco"><input data-v placeholder="exemplo.com.br" spellcheck="false"><button class="chip primary" data-ok>Investigar</button></div>
     <div class="btg-exemplos">${EXEMPLOS.map((x) => `<button class="btg-ex" data-ex="${esc(x)}">${esc(x)}</button>`).join('')}</div>
     <p class="btg-mudo">ou <button class="btg-link" data-colar>cole um texto</button> e o Bluetego acha as entidades nele · <button class="btg-link" data-atalhos>atalhos do teclado (?)</button></p></div>`;
   const v = R.vazio.querySelector('[data-v]');
-  const ir = async () => { if (!v.value.trim()) return v.focus(); try { const n = await adicionarValor(v.value); v.value = ''; if (n) rapidas([n]); } catch (e) { toast(e.message, 'err'); } };
+  const ir = async () => { if (!v.value.trim()) return v.focus(); try { const n = await adicionarValor(v.value); v.value = ''; if (n && !n.feitas.length) primeiroOlhar(n); } catch (e) { toast(e.message, 'err'); } };
   R.vazio.querySelector('[data-ok]').onclick = ir;
   v.onkeydown = (e) => { if (e.key === 'Enter') ir(); };
   R.vazio.querySelector('[data-colar]').onclick = () => dlgColar();
