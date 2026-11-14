@@ -153,7 +153,7 @@ caso('aprendizado: a pista sugere a transformação que mais rendeu e esquece a 
   assert.equal(p.acao.t, 'certificado');
   assert.match(p.texto, /Costuma trazer 10 resultados/);
 });
-caso('catálogo: 56 transformações', () => assert.equal(TRANSFORMACOES.length, 56));
+caso('catálogo: toda transformação tem nome, fonte e tipo de origem', () => { for (const t of TRANSFORMACOES) assert.ok(t.nome && t.fonte && t.de.length && typeof t.run === 'function', t.id); });
 
 await Promise.all(pendentes);
 console.log(`testes avançados do Bluetego: ${ok} de ${pendentes.length} passaram`);

@@ -52,7 +52,8 @@ const ctxRede = {
     const r = await pedir(url, { redirect: opt.seguir === false ? 'manual' : 'follow', timeout: opt.timeout, headers: { accept: 'text/html,*/*;q=0.8', ...(opt.navegador ? { 'user-agent': NAVEGADOR, 'accept-language': 'pt-BR,pt;q=0.9,en;q=0.7' } : {}), ...(opt.headers || {}) } });
     const headers = Object.fromEntries([...r.headers.entries()].map(([k, v]) => [k.toLowerCase(), v]));
     let texto = '';
-    if (/text|html|json|xml/i.test(headers['content-type'] || '') && r.body) {
+    // texto também quando o tipo é de chave PGP ou JavaScript (o keys.openpgp.org responde application/pgp-keys)
+    if (/text|html|json|xml|javascript|pgp/i.test(headers['content-type'] || '') && r.body) {
       // lê no máximo 2 MB: uma página enorme (ou um download) não trava o servidor
       const leitor = r.body.getReader(), partes = [];
       let total = 0;

@@ -104,7 +104,13 @@ async function donoAS(ctx, asn) {
   try { return (await ripe(ctx, 'as-overview', asn)).data.holder || ''; } catch { return ''; }
 }
 export async function ipParaASN(ctx, ip) {
-  const d = (await ripe(ctx, 'network-info', ip)).data || {};
+  let d;
+  try { d = (await ripe(ctx, 'network-info', ip)).data || {}; } catch {
+    // reserva: o Team Cymru responde por DNS ("15169 | 8.8.8.0/24 | US | arin | 1992-12-01")
+    const t = (await dns(ctx, nomeReverso(ip).replace(/\.(in-addr|ip6)\.arpa$/, ip.includes(':') ? '.origin6.asn.cymru.com' : '.origin.asn.cymru.com'), 'TXT').catch(() => []))[0] || '';
+    const [asn, prefixo] = tiraAspas(t).split('|').map((x) => x.trim());
+    d = asn ? { asns: asn.split(' ').filter(Boolean), prefix: prefixo } : {};
+  }
   if (!d.asns || !d.asns.length) return { entidades: [], aviso: 'Este endereço não é anunciado por nenhum sistema autônomo (IP privado ou reservado?).' };
   const out = [];
   const rede = d.prefix ? ent('rede', d.prefix, 'anunciado no prefixo') : null;
@@ -313,6 +319,7 @@ const SITES = [
   { nome: 'Speedrun.com', url: (u) => `https://www.speedrun.com/api/v1/users/${u}`, achou: (d) => d && d.data && d.data.id, perfil: (d) => d.data.weblink, dados: (d) => ({ local: d.data.location && d.data.location.country && d.data.location.country.names && d.data.location.country.names.international }) },
   { nome: 'Gravatar', url: (u) => `https://api.gravatar.com/v3/profiles/${u}`, achou: (d) => d && d.profile_url, perfil: (d) => d.profile_url, dados: (d) => ({ nome: d.display_name, local: d.location, empresa: d.company, bio: d.description }) },
   { nome: 'Steam', url: (u) => `https://steamcommunity.com/id/${u}?xml=1`, html: true, achou: (t) => /<steamID64>\d+<\/steamID64>/.test(t), perfil: (_t, u) => `https://steamcommunity.com/id/${u}`, dados: (t) => ({ nome: cdata(t, 'realname'), local: cdata(t, 'location'), bio: cdata(t, 'summary') }) },
+  { nome: 'Hugging Face', url: (u) => `https://huggingface.co/api/users/${u}/overview`, achou: (d) => d && (d.user || d.fullname), perfil: (d) => `https://huggingface.co/${d.user || ''}`, dados: (d) => ({ nome: d.fullname, empresa: (d.orgs || []).map((o) => o.fullname || o.name).filter(Boolean).slice(0, 3).join(', ') }) },
   { nome: 'Telegram', url: (u) => `https://t.me/${u}`, html: true, valido: (u) => /^[a-z][a-z0-9_]{4,31}$/i.test(u), achou: (t) => /tgme_page_title/.test(t), perfil: (_t, u) => `https://t.me/${u}`, dados: (t) => ({ nome: tira((String(t).match(/<meta property="og:title" content="([^"]*)"/) || [])[1]), bio: tira((String(t).match(/<meta property="og:description" content="([^"]*)"/) || [])[1]) }) },
 ];
 // a API do GitHub sem token aceita 60 consultas por hora; com o token do Cofre, 5.000
@@ -539,7 +546,7 @@ export async function web(ctx, valor, tipo) {
 const curtoT = (s, n) => (String(s).length > n ? String(s).slice(0, n - 1) + '…' : String(s));
 
 // ---------- telefone, CVE, texto ----------
-export function telefone(_ctx, numero) {
+export async function telefone(ctx, numero) {
   const i = telefoneInfo(numero);
   if (!i) return { entidades: [], aviso: 'Não reconheci o número. Escreva com o DDD (51 99999-1234) ou com o código do país (+351 912 345 678).' };
   const n = normalizar('telefone', numero), dig = n.replace(/\D/g, '');
@@ -552,7 +559,10 @@ export function telefone(_ctx, numero) {
     out.push(ent('conta', `https://t.me/+${dig}`, 'link do Telegram', { props: { aviso: 'abre o perfil se o número usar Telegram e deixar ser achado pelo número' } }));
     out.push(ent('conta', `https://signal.me/#p/+${dig}`, 'link do Signal', { props: { aviso: 'abre a conversa se o número usar Signal' } }));
   }
-  return { entidades: out, props: { país: i.pais, DDI: i.ddi, DDD: i.ddd || '', tipo: i.tipo || '', região: i.regiao || '', 'jeitos de escrever': (i.formatos || []).slice(1).join(' · ') } };
+  // as cidades que o DDD cobre (BrasilAPI); sem rede, fica só o que se sabe sem consultar
+  let cidades = '';
+  if (i.ddd && ctx.json) { try { const d = await ctx.json(`https://brasilapi.com.br/api/ddd/v1/${i.ddd}`, { nulo404: true }); if (d && d.cities) cidades = `${d.cities.length}: ${d.cities.slice(0, 12).map((c) => c.toLowerCase().replace(/(^|\s)\S/g, (x) => x.toUpperCase())).join(', ')}${d.cities.length > 12 ? '…' : ''}`; } catch {} }
+  return { entidades: out, props: { país: i.pais, DDI: i.ddi, DDD: i.ddd || '', tipo: i.tipo || '', região: i.regiao || '', 'cidades do DDD': cidades, 'jeitos de escrever': (i.formatos || []).slice(1).join(' · ') } };
 }
 export async function cve(ctx, id) {
   const d = await ctx.json(`https://cveawg.mitre.org/api/cve/${encodeURIComponent(id)}`, { nulo404: true });
@@ -883,10 +893,13 @@ export async function githubNome(ctx, nome) {
   return { entidades: itens.map((x) => ent('apelido', x.login, 'conta do GitHub com este nome (pode ser homônimo)', { props: { GitHub: x.html_url } })), props: { 'contas no GitHub com este nome': r ? r.total_count || 0 : 0 }, aviso: itens.length ? '' : 'Nenhuma conta do GitHub com este nome.' };
 }
 // artigos da Wikipédia que citam o nome (pessoa ou organização)
+// a Wikipédia em português e em inglês (conteúdo CC BY-SA: cite a fonte)
 export async function wikipedia(ctx, nome) {
-  const d = await ctx.json(`https://pt.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=10&srsearch=${encodeURIComponent('"' + nome + '"')}`);
-  const res = (d && d.query && d.query.search) || [];
-  return { entidades: res.map((a) => ent('url', `https://pt.wikipedia.org/wiki/${encodeURIComponent(a.title.replace(/ /g, '_'))}`, 'citado na Wikipédia', { rotulo: `Wikipédia · ${a.title}`, props: { trecho: tira(a.snippet) } })), props: { Wikipédia: `${(d && d.query && d.query.searchinfo && d.query.searchinfo.totalhits) || 0} artigos citam o nome` }, aviso: res.length ? '' : 'Nenhum artigo da Wikipédia cita este nome.' };
+  const busca = (l) => ctx.json(`https://${l}.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=8&srsearch=${encodeURIComponent('"' + nome + '"')}`).then((d) => ({ l, d })).catch(() => ({ l, d: null }));
+  const res = await Promise.all(['pt', 'en'].map(busca));
+  const out = res.flatMap(({ l, d }) => ((d && d.query && d.query.search) || []).map((a) => ent('url', `https://${l}.wikipedia.org/wiki/${encodeURIComponent(a.title.replace(/ /g, '_'))}`, `citado na Wikipédia (${l})`, { rotulo: `Wikipédia ${l} · ${a.title}`, props: { trecho: tira(a.snippet) } })));
+  const tot = (l) => { const x = res.find((r) => r.l === l); return (x && x.d && x.d.query && x.d.query.searchinfo && x.d.query.searchinfo.totalhits) || 0; };
+  return { ...corta(out, ctx), props: { Wikipédia: `${tot('pt')} artigos em português, ${tot('en')} em inglês citam o nome` }, aviso: out.length ? '' : 'Nenhum artigo da Wikipédia cita este nome.' };
 }
 
 // ---------- ASN: vizinhos (quem dá e quem recebe trânsito) ----------
@@ -1191,6 +1204,402 @@ export async function contasAmplo(ctx, apelido) {
   };
 }
 
+// ---------- chaves PGP: o elo entre um e-mail, o nome real e os outros e-mails da mesma pessoa ----------
+// keys.openpgp.org só publica e-mail que o dono confirmou (verificado); o keyserver.ubuntu.com aceita qualquer UID
+// (autodeclarado: qualquer um pode publicar uma chave com qualquer nome). A ligação diz qual dos dois.
+export function lerIndicePgp(texto) {
+  const chaves = [];
+  let atual = null;
+  for (const linha of String(texto || '').split('\n')) {
+    const c = linha.split(':');
+    if (c[0] === 'pub') { atual = { fpr: c[1], criada: c[4] ? new Date(Number(c[4]) * 1000).toISOString().slice(0, 10) : '', uids: [] }; chaves.push(atual); }
+    else if (c[0] === 'uid' && atual) { try { atual.uids.push(decodeURIComponent(c[1])); } catch { atual.uids.push(c[1]); } }
+  }
+  // chave sem nenhum UID é lixo (as chaves envenenadas de 2019 são assim)
+  return chaves.filter((k) => k.uids.length);
+}
+const lerUid = (uid) => { const m = String(uid).match(/^\s*([^<(]*?)\s*(?:\(([^)]*)\))?\s*(?:<([^>]+)>)?\s*$/); return m ? { nome: m[1].trim(), comentario: (m[2] || '').trim(), email: (m[3] || '').trim().toLowerCase() } : { nome: '', comentario: '', email: '' }; };
+function entidadesPgp(chaves, origem, verificada) {
+  const out = [];
+  const lig = verificada ? 'mesma chave PGP (e-mail verificado)' : 'mesma chave PGP (autodeclarado)';
+  for (const k of chaves.slice(0, 8)) for (const uid of k.uids) {
+    const u = lerUid(uid);
+    if (u.email && u.email !== origem && /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(u.email)) out.push(ent('email', u.email, lig, { props: { 'chave PGP': k.fpr, 'chave criada': k.criada, ...(u.comentario ? { comentário: u.comentario } : {}) } }));
+    if (u.nome && /\s/.test(u.nome) && u.nome.length < 80) out.push(ent('pessoa', u.nome, verificada ? 'nome na chave PGP' : 'nome na chave PGP (autodeclarado)', { props: { 'chave PGP': k.fpr } }));
+  }
+  return out;
+}
+export async function pgpEmail(ctx, email) {
+  const out = [], chaves = [];
+  // verificado primeiro: o servidor confere o e-mail com o dono
+  try {
+    const r = await ctx.pagina(`https://keys.openpgp.org/vks/v1/by-email/${encodeURIComponent(email)}`);
+    if (r.status === 200) {
+      const fpr = ((r.texto.match(/^Comment: ([0-9A-F][0-9A-F ]{38,}?)\s*$/m) || [])[1] || '').replace(/\s/g, '');
+      const emails = [...r.texto.matchAll(/^Comment: <([^>]+)>\s*$/gm)].map((m) => m[1].toLowerCase());
+      chaves.push({ fpr, verificada: true });
+      out.push(...entidadesPgp([{ fpr, criada: '', uids: emails.map((e) => `<${e}>`) }], email, true));
+    }
+  } catch {}
+  try {
+    const r = await ctx.pagina(`https://keyserver.ubuntu.com/pks/lookup?search=${encodeURIComponent(email)}&op=index&options=mr`);
+    if (r.status === 200) { const ks = lerIndicePgp(r.texto); ks.forEach((k) => chaves.push({ fpr: k.fpr, verificada: false })); out.push(...entidadesPgp(ks, email, false)); }
+  } catch {}
+  return { entidades: unicos(out), props: { 'chaves PGP': chaves.length ? chaves.map((k) => `${k.fpr.slice(-16)}${k.verificada ? ' (verificada)' : ''}`).join(', ') : 'nenhuma' }, aviso: chaves.length ? '' : 'Nenhuma chave PGP publicada com este e-mail.' };
+}
+export async function pgpNome(ctx, nome) {
+  if (String(nome).trim().split(/\s+/).length < 2) return { entidades: [], aviso: 'Use o nome completo.' };
+  const r = await ctx.pagina(`https://keyserver.ubuntu.com/pks/lookup?search=${encodeURIComponent(nome)}&op=index&options=mr`);
+  if (r.status === 500) return { entidades: [], aviso: 'Nome comum demais: o servidor de chaves recusou a busca (resultados demais).' };
+  if (r.status !== 200) return { entidades: [], aviso: 'Nenhuma chave PGP com este nome.' };
+  // só as chaves cujo UID tem o nome procurado (o servidor também acha partes do nome)
+  const alvo = semAcento_(nome);
+  const ks = lerIndicePgp(r.texto).filter((k) => k.uids.some((u) => semAcento_(lerUid(u).nome) === alvo));
+  const out = [];
+  for (const k of ks.slice(0, 10)) for (const uid of k.uids) { const u = lerUid(uid); if (u.email) out.push(ent('email', u.email, 'chave PGP com este nome (pode ser homônimo)', { props: { 'chave PGP': k.fpr, 'chave criada': k.criada, ...(u.comentario ? { comentário: u.comentario } : {}) } })); }
+  return { entidades: unicos(out), props: { 'chaves PGP com o nome': ks.length }, aviso: ks.length ? '' : 'Nenhuma chave PGP com exatamente este nome.' };
+}
+
+// ---------- Launchpad: conta, apelidos de IRC e chaves (só por nome ou apelido: a busca por e-mail revelaria
+// o dono de um e-mail que ele escolheu esconder) ----------
+export async function launchpad(ctx, valor, tipo) {
+  const q = tipo === 'apelido' ? valor.replace(/^@/, '') : valor;
+  const d = await ctx.json(`https://api.launchpad.net/1.0/people?ws.op=findPerson&text=${encodeURIComponent(q)}&ws.size=10`);
+  let pessoas = ((d && d.entries) || []).filter((p) => !p.is_team);
+  if (tipo === 'apelido') pessoas = pessoas.filter((p) => String(p.name).toLowerCase() === q.toLowerCase());
+  else { const alvo = semAcento_(q); pessoas = pessoas.filter((p) => semAcento_(p.display_name) === alvo); }
+  const out = [];
+  for (const p of pessoas.slice(0, 5)) {
+    const conta = ent('conta', `https://launchpad.net/~${p.name}`, tipo === 'apelido' ? 'conta no Launchpad' : 'conta no Launchpad com este nome (pode ser homônimo)', { props: { site: 'Launchpad', criada: data(p.date_created), karma: p.karma, 'fuso horário': p.time_zone || '' } });
+    out.push(conta);
+    const de = { tipo: 'conta', valor: conta.valor };
+    if (tipo === 'apelido' && p.display_name && /\s/.test(p.display_name)) out.push(ent('pessoa', p.display_name, 'nome no Launchpad', { de }));
+    const [irc, gpg] = await Promise.all([ctx.json(`https://api.launchpad.net/1.0/~${p.name}/irc_nicknames`).catch(() => null), ctx.json(`https://api.launchpad.net/1.0/~${p.name}/gpg_keys`).catch(() => null)]);
+    // apelido de IRC igual ao procurado não acrescenta nada
+    for (const n of (irc && irc.entries) || []) if (n.nickname && n.nickname.toLowerCase() !== q.toLowerCase()) out.push(ent('apelido', n.nickname, `apelido no IRC (${n.network})`, { de }));
+    const fprs = ((gpg && gpg.entries) || []).map((k) => k.fingerprint).filter(Boolean);
+    if (fprs.length) conta.props['chaves GPG'] = fprs.join(', ');
+  }
+  return { entidades: unicos(out), aviso: pessoas.length ? '' : 'Nenhuma conta no Launchpad.' };
+}
+
+// ---------- busca de contas pelo nome no Bluesky e no fediverso ----------
+export async function blueskyBusca(ctx, valor, tipo) {
+  const d = await ctx.json(`https://public.api.bsky.app/xrpc/app.bsky.actor.searchActors?q=${encodeURIComponent(valor.replace(/^@/, ''))}&limit=10`);
+  const atores = (d && d.actors) || [];
+  const porNome = tipo !== 'apelido';
+  return { entidades: atores.map((a) => ent('conta', `https://bsky.app/profile/${a.handle}`, porNome ? 'conta no Bluesky com este nome (pode ser homônimo)' : 'conta no Bluesky parecida', { rotulo: `Bluesky · ${a.displayName || a.handle}`, props: { site: 'Bluesky', nome: a.displayName || '', bio: tira(a.description || '').slice(0, 200), criada: data(a.createdAt) } })), aviso: atores.length ? '' : 'Nenhuma conta no Bluesky.' };
+}
+export async function fediverso(ctx, valor, tipo) {
+  const d = await ctx.json(`https://mastodon.social/api/v2/search?q=${encodeURIComponent(valor.replace(/^@/, ''))}&type=accounts&limit=10`);
+  const contas_ = (d && d.accounts) || [];
+  const porNome = tipo !== 'apelido';
+  return {
+    entidades: contas_.map((a) => ent('conta', a.url, porNome ? 'conta no fediverso com este nome (pode ser homônimo)' : 'conta no fediverso', { rotulo: `Fediverso · ${a.acct}`, props: { site: 'Mastodon/fediverso', nome: a.display_name || '', bio: tira(a.note || '').slice(0, 200), criada: data(a.created_at), seguidores: a.followers_count } })),
+    props: { 'instâncias': [...new Set(contas_.map((a) => (a.acct.split('@')[1] || 'mastodon.social')))].slice(0, 8).join(', ') },
+    aviso: contas_.length ? '' : 'Nenhuma conta no fediverso (que a mastodon.social conheça).',
+  };
+}
+
+// ---------- Stack Exchange: perfis com o nome e as contas da mesma pessoa na rede ----------
+export async function stackexchange(ctx, valor, tipo) {
+  const q = valor.replace(/^@/, '');
+  const d = await ctx.json(`https://api.stackexchange.com/2.3/users?inname=${encodeURIComponent(q)}&site=stackoverflow&pagesize=10&order=desc&sort=reputation`);
+  const exatos = ((d && d.items) || []).filter((u) => semAcento_(tira(u.display_name)) === semAcento_(q));
+  const out = [];
+  for (const u of exatos.slice(0, 5)) {
+    const conta = ent('conta', u.link, tipo === 'apelido' ? 'conta no Stack Overflow' : 'conta no Stack Overflow com este nome (pode ser homônimo)', { props: { site: 'Stack Overflow', reputação: u.reputation, criada: u.creation_date ? new Date(u.creation_date * 1000).toISOString().slice(0, 10) : '' } });
+    out.push(conta);
+    const de = { tipo: 'conta', valor: conta.valor };
+    if (u.location) out.push(ent('local', tira(u.location), 'diz morar em', { de }));
+    if (u.website_url) out.push(ent('url', u.website_url, 'site no perfil', { de }));
+  }
+  // as outras contas da mesma pessoa na rede (só quando o perfil é um só: com vários, seria misturar pessoas)
+  if (exatos.length === 1 && exatos[0].account_id) {
+    const a = await ctx.json(`https://api.stackexchange.com/2.3/users/${exatos[0].account_id}/associated?pagesize=30`).catch(() => null);
+    for (const s of (a && a.items) || []) if (s.site_url && s.site_url !== 'https://stackoverflow.com') out.push(ent('conta', `${s.site_url}/users/${s.user_id}`, `mesma pessoa no ${s.site_name}`, { de: { tipo: 'conta', valor: normalizar('url', exatos[0].link) }, props: { site: s.site_name, reputação: s.reputation } }));
+  }
+  return { entidades: unicos(out), props: { 'Stack Exchange': 'conteúdo CC BY-SA (cite a fonte)', 'cota restante hoje': d && d.quota_remaining != null ? d.quota_remaining : '' }, aviso: exatos.length ? '' : 'Nenhum perfil do Stack Overflow com exatamente este nome.' };
+}
+
+// ---------- Hacker News (Algolia): o que o apelido publica e os sites que ele mais divulga ----------
+export async function hackerNews(ctx, apelido) {
+  const u = apelido.replace(/^@/, '');
+  const d = await ctx.json(`https://hn.algolia.com/api/v1/search_by_date?tags=author_${encodeURIComponent(u)}&hitsPerPage=100`);
+  const hits = (d && d.hits) || [];
+  if (!hits.length) return { entidades: [], aviso: 'Nenhuma publicação no Hacker News com este apelido.' };
+  const doms = {};
+  for (const h of hits) if (h.url) { try { const host = new URL(h.url).hostname.replace(/^www\./, ''); doms[host] = (doms[host] || 0) + 1; } catch {} }
+  const top = Object.entries(doms).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const datas = hits.map((h) => h.created_at).filter(Boolean).sort();
+  return {
+    entidades: [ent('conta', `https://news.ycombinator.com/user?id=${u}`, 'conta no Hacker News', { props: { site: 'Hacker News' } }), ...top.map(([dom, q]) => ent('dominio', dom, 'divulga no Hacker News', { de: { tipo: 'conta', valor: normalizar('url', `https://news.ycombinator.com/user?id=${u}`) }, props: { publicações: q } }))],
+    props: { 'publicações no HN': `${d.nbHits} (ativo de ${data(datas[0])} a ${data(datas[datas.length - 1])})`, 'histórias mais votadas': hits.filter((h) => h.title).sort((a, b) => (b.points || 0) - (a.points || 0)).slice(0, 3).map((h) => h.title).join(' · ') },
+  };
+}
+
+// ---------- npm: o e-mail que o próprio registro mostra e os repositórios dos pacotes ----------
+export async function npmMantenedor(ctx, apelido) {
+  const u = apelido.replace(/^@/, '').toLowerCase();
+  const d = await ctx.json(`https://registry.npmjs.org/-/v1/search?text=maintainer:${encodeURIComponent(u)}&size=50`);
+  const objs = ((d && d.objects) || []).filter((o) => (o.package.maintainers || []).some((m) => String(m.username).toLowerCase() === u) || String((o.package.publisher || {}).username).toLowerCase() === u);
+  if (!objs.length) return { entidades: [], aviso: 'Nenhum pacote no npm com este mantenedor.' };
+  const conta = ent('conta', `https://www.npmjs.com/~${u}`, 'mantenedor no npm', { props: { site: 'npm', pacotes: d.total } });
+  const de = { tipo: 'conta', valor: conta.valor }, out = [conta];
+  const emails = new Set();
+  for (const o of objs) for (const m of [o.package.publisher, ...(o.package.maintainers || [])]) if (m && String(m.username).toLowerCase() === u && m.email) emails.add(m.email.toLowerCase());
+  for (const e of emails) out.push(ent('email', e, 'e-mail no npm', { de }));
+  const repos = new Set(objs.map((o) => ((o.package.links || {}).repository || '').replace(/^git\+/, '').replace(/\.git$/, '')).filter((r) => /^https?:\/\//.test(r)));
+  for (const r of [...repos].slice(0, 8)) out.push(ent('url', r, 'repositório de pacote', { de }));
+  return { entidades: unicos(out), props: { 'pacotes no npm': d.total, 'mais conhecidos': objs.slice(0, 5).map((o) => o.package.name).join(', ') } };
+}
+
+// ---------- pesquisadores: OpenAlex (nome → ORCID e instituição) e o perfil completo do ORCID ----------
+export async function openalex(ctx, nome) {
+  if (String(nome).trim().split(/\s+/).length < 2) return { entidades: [], aviso: 'Use o nome completo.' };
+  const d = await ctx.json(`https://api.openalex.org/authors?search=${encodeURIComponent(nome)}&per_page=5&select=id,display_name,orcid,works_count,cited_by_count,last_known_institutions,display_name_alternatives`);
+  const res = ((d && d.results) || []).filter((a) => a.works_count > 0);
+  const out = [];
+  for (const a of res) {
+    const conta = a.orcid ? ent('conta', a.orcid, 'autor no OpenAlex (pode ser homônimo)', { rotulo: `ORCID · ${a.display_name}`, props: { trabalhos: a.works_count, citações: a.cited_by_count, OpenAlex: a.id } }) : null;
+    if (conta) out.push(conta);
+    for (const i of (a.last_known_institutions || []).slice(0, 2)) out.push(ent('organizacao', i.display_name, 'instituição (OpenAlex)', conta ? { de: { tipo: 'conta', valor: conta.valor }, props: { país: i.country_code || '' } } : { props: { país: i.country_code || '' } }));
+  }
+  return { entidades: unicos(out), props: { 'autores com o nome (OpenAlex)': d && d.meta ? d.meta.count : 0, 'variantes do nome': [...new Set(res.flatMap((a) => a.display_name_alternatives || []))].slice(0, 6).join(', ') }, aviso: res.length ? (res.length > 1 ? 'Vários autores com nome parecido: o ORCID separa um do outro.' : '') : 'Nenhum autor com este nome no OpenAlex.' };
+}
+export async function orcidPerfil(ctx, url) {
+  const id = (String(url).match(/(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/) || [])[1];
+  if (!id) return { entidades: [], aviso: 'Não é um ORCID (0000-0000-0000-0000).' };
+  const [p, emp] = await Promise.all([ctx.json(`https://pub.orcid.org/v3.0/${id}/person`, { nulo404: true }), ctx.json(`https://pub.orcid.org/v3.0/${id}/employments`, { nulo404: true }).catch(() => null)]);
+  if (!p) return { entidades: [], aviso: 'ORCID não encontrado.' };
+  const out = [];
+  const nome = [p.name && p.name['given-names'] && p.name['given-names'].value, p.name && p.name['family-name'] && p.name['family-name'].value].filter(Boolean).join(' ');
+  if (nome) out.push(ent('pessoa', nome, 'nome no ORCID'));
+  for (const u of ((p['researcher-urls'] || {})['researcher-url'] || [])) if (u.url && u.url.value) out.push(ent('url', u.url.value, `site do pesquisador${u['url-name'] ? ` (${u['url-name']})` : ''}`));
+  for (const e of ((p.emails || {}).email || [])) if (e.email) out.push(ent('email', e.email, 'e-mail público no ORCID'));
+  const empregos = ((emp && emp['affiliation-group']) || []).flatMap((g) => (g.summaries || []).map((s) => s['employment-summary'])).filter(Boolean);
+  for (const s of empregos.slice(0, 8)) if (s.organization && s.organization.name) out.push(ent('organizacao', s.organization.name, s['role-title'] ? `trabalha ou trabalhou como ${s['role-title']}` : 'vínculo (ORCID)', { props: { desde: (s['start-date'] && s['start-date'].year && s['start-date'].year.value) || '', até: (s['end-date'] && s['end-date'].year && s['end-date'].year.value) || 'atual', cidade: (s.organization.address && s.organization.address.city) || '' } }));
+  return {
+    entidades: unicos(out),
+    props: { 'outros nomes': (((p['other-names'] || {})['other-name']) || []).map((o) => o.content).join(', '), 'palavras-chave': (((p.keywords || {}).keyword) || []).map((k) => k.content).join(', '), 'identificadores': (((p['external-identifiers'] || {})['external-identifier']) || []).map((x) => `${x['external-id-type']}: ${x['external-id-value']}`).join(' · '), país: (((p.addresses || {}).address) || []).map((a) => a.country && a.country.value).filter(Boolean).join(', ') },
+  };
+}
+
+// ---------- Wikimedia: a conta global (todas as wikis em que o apelido edita) ----------
+export async function wikimediaGlobal(ctx, apelido) {
+  const u = apelido.replace(/^@/, '');
+  const d = await ctx.json(`https://meta.wikimedia.org/w/api.php?action=query&meta=globaluserinfo&guiuser=${encodeURIComponent(u)}&guiprop=merged&format=json`);
+  const g = d && d.query && d.query.globaluserinfo;
+  if (!g || 'missing' in g) return { entidades: [], aviso: 'Nenhuma conta global da Wikimedia com este nome.' };
+  const ativas = (g.merged || []).filter((w) => w.editcount > 0).sort((a, b) => b.editcount - a.editcount);
+  return {
+    entidades: ativas.slice(0, 6).map((w) => ent('conta', `${w.url}/wiki/Special:Contributions/${encodeURIComponent(g.name.replace(/ /g, '_'))}`, `edita na ${w.wiki}`, { rotulo: `${w.wiki} · ${g.name}`, props: { site: w.wiki, edições: w.editcount } })),
+    props: { 'conta global da Wikimedia': `desde ${data(g.registration)}, criada na ${g.home || '?'}`, 'wikis com edição': ativas.length, 'wikis no total': (g.merged || []).length },
+  };
+}
+
+// ---------- nomes no Brasil: quantas pessoas têm o primeiro nome (IBGE) e deputados federais (Câmara) ----------
+export async function nomeIbge(ctx, nome) {
+  const pri = semAcento_(String(nome).trim().split(/\s+/)[0]).replace(/[^a-z]/g, '');
+  if (pri.length < 2) return { entidades: [], aviso: 'Nome curto demais.' };
+  const [geral, porUf] = await Promise.all([ctx.json(`https://servicodados.ibge.gov.br/api/v2/censos/nomes/${pri}`), ctx.json(`https://servicodados.ibge.gov.br/api/v2/censos/nomes/${pri}?groupBy=UF`).catch(() => null)]);
+  const res = ((geral || [])[0] || {}).res || [];
+  if (!res.length) return { entidades: [], aviso: 'O IBGE não tem este primeiro nome no Censo (nome raro: menos chance de homônimo).' };
+  const total = res.reduce((a, x) => a + x.frequencia, 0);
+  const pico = res.reduce((a, x) => (x.frequencia > a.frequencia ? x : a), res[0]);
+  const ufs = (porUf || []).map((x) => ({ uf: x.localidade, prop: (x.res[0] || {}).proporcao || 0 })).sort((a, b) => b.prop - a.prop).slice(0, 3);
+  return { entidades: [], props: { [`pessoas chamadas ${pri} no Brasil`]: total.toLocaleString('pt-BR'), 'década mais comum de nascimento': pico.periodo.replace(/[[\]]/g, '').replace(',', '–'), 'risco de homônimo': total > 100000 ? 'alto' : total > 5000 ? 'médio' : 'baixo', 'estados onde é mais comum (código IBGE)': ufs.map((x) => x.uf).join(', ') } };
+}
+export async function deputado(ctx, nome) {
+  const d = await ctx.json(`https://dadosabertos.camara.leg.br/api/v2/deputados?nome=${encodeURIComponent(nome)}&ordem=ASC&ordenarPor=nome`);
+  const deps = (d && d.dados) || [];
+  const out = [];
+  for (const x of deps.slice(0, 5)) {
+    out.push(ent('organizacao', `Câmara dos Deputados`, `deputado(a) federal (${x.siglaPartido}-${x.siglaUf})`, { props: { 'nome parlamentar': x.nome, partido: x.siglaPartido, UF: x.siglaUf } }));
+    if (x.email) out.push(ent('email', x.email, 'e-mail do gabinete'));
+    if (x.siglaPartido) out.push(ent('organizacao', x.siglaPartido, 'partido'));
+  }
+  return { entidades: unicos(out), props: deps[0] ? { 'mandato atual': `${deps[0].nome} (${deps[0].siglaPartido}-${deps[0].siglaUf})`, perfil: `https://www.camara.leg.br/deputados/${deps[0].id}` } : {}, aviso: deps.length ? '' : 'Não é deputado(a) federal na legislatura atual.' };
+}
+
+// ---------- listas baixadas inteiras (CISA KEV, Spamhaus DROP, saídas do Tor): guardadas na memória por horas ----------
+const LISTAS = new Map();
+async function lista(ctx, url, horas, ler) {
+  const x = LISTAS.get(url);
+  if (x && Date.now() - x.em < horas * 3600000) return x.v;
+  const v = ler(await ctx.pagina(url, { timeout: 60000 }));
+  LISTAS.set(url, { em: Date.now(), v });
+  return v;
+}
+const privado = (ip) => /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i.test(ip);
+
+// ---------- reputação do IP: GreyNoise, SANS ISC, Tor, StopForumSpam e Spamhaus DROP num pedido só ----------
+export async function ipReputacao(ctx, ip) {
+  if (privado(ip)) return { entidades: [], aviso: 'Endereço privado ou reservado: não tem reputação pública.' };
+  const props = {}, out = [], ruins = [];
+  await Promise.all([
+    // GreyNoise: varre a internet em massa (ruído) ou é serviço comum e benigno (RIOT)?
+    ctx.json(`https://api.greynoise.io/v3/community/${ip}`, { nulo404: true }).then((g) => {
+      if (!g) { props.GreyNoise = 'não visto varrendo a internet'; return; }
+      props.GreyNoise = g.riot ? `serviço comum e benigno (${g.name || 'RIOT'})` : g.noise ? `varre a internet (${g.classification || 'desconhecido'}), visto em ${g.last_seen || '?'}` : g.message || '';
+      if (g.classification === 'malicious') ruins.push('GreyNoise: malicioso');
+    }).catch(() => { props.GreyNoise = 'sem resposta (cota de 25 consultas)'; }),
+    // SANS ISC: em quais listas de ameaça o IP está, e quem cuida de abuso na rede dele
+    ctx.json(`https://isc.sans.edu/api/ip/${ip}?json`).then((d) => {
+      const i = (d && d.ip) || {};
+      const feeds = Object.entries(i.threatfeeds || {});
+      props['listas de ameaça (SANS ISC)'] = feeds.length ? feeds.map(([k, v]) => `${k} (até ${v.lastseen || '?'})`).join(', ') : 'nenhuma';
+      if (i.attacks) props['ataques vistos (SANS ISC)'] = i.attacks;
+      // lista informativa (resolvedor aberto, "meu IP", Mastodon, Tor) não é ameaça
+      const ameacas = feeds.map(([k]) => k).filter((k) => /talos|blocklist|ciarmy|compromis|botnet|malware|threat|feodo|sslbl|spamhaus|abuse|brute|scan|attack|forumspam|emerging|c2|phish/i.test(k));
+      if (ameacas.length) ruins.push(`SANS ISC: ${ameacas.join(', ')}`);
+      if (i.asabusecontact) out.push(ent('email', i.asabusecontact, 'contato de abuso da rede'));
+    }).catch(() => {}),
+    // Tor: relay de saída, com o operador
+    ctx.json(`https://onionoo.torproject.org/details?search=${encodeURIComponent(ip)}&limit=3`).then((d) => {
+      const r = ((d && d.relays) || [])[0];
+      if (!r) return;
+      props.Tor = `relay ${r.nickname}${(r.flags || []).includes('Exit') ? ' (saída)' : ''}, ${r.country_name || r.country || ''} · visto até ${data(r.last_seen)}`;
+      for (const h of (r.verified_host_names || []).slice(0, 3)) out.push(ent('dominio', h, 'nome do relay Tor'));
+      if (r.contact) for (const e of extrair(r.contact).filter((x) => x.tipo === 'email')) out.push(ent('email', e.valor, 'contato do operador Tor'));
+    }).catch(() => {}),
+    // StopForumSpam: spam em formulários e fóruns
+    ctx.json(`https://api.stopforumspam.org/api?ip=${ip}&json`).then((d) => {
+      const s = (d && d.ip) || {};
+      if (s.appears) { props.StopForumSpam = `${s.frequency} denúncias de spam, a última em ${String(s.lastseen || '').slice(0, 10)} (confiança ${Math.round(s.confidence || 0)}%)`; if ((s.confidence || 0) > 50) ruins.push('StopForumSpam'); }
+    }).catch(() => {}),
+    // Spamhaus DROP: redes sequestradas ou de criminosos (não se deve nem rotear)
+    lista(ctx, 'https://www.spamhaus.org/drop/drop_v4.json', 1, (r) => String(r.texto).split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.cidr)).then((drop) => {
+      const hit = /^\d+\.\d+\.\d+\.\d+$/.test(ip) && drop.find((x) => dentroDaRedeT(ip, x.cidr));
+      if (hit) { props['Spamhaus DROP'] = `${hit.cidr} (${hit.sblid}): rede de criminosos, não deve ser roteada`; ruins.push('Spamhaus DROP'); }
+    }).catch(() => {}),
+  ]);
+  if (ruins.length) props.risco = ruins.join('; ');
+  return { entidades: unicos(out), props, alerta: ruins.length > 0, aviso: Object.keys(props).length ? '' : 'Nenhuma fonte de reputação respondeu.' };
+}
+const ip4n = (s) => String(s).split('.').reduce((a, x) => a * 256 + Number(x), 0);
+function dentroDaRedeT(ip, cidr) { const [r, b] = String(cidr).split('/'); const passo = 2 ** (32 - Number(b)); return Math.floor(ip4n(ip) / passo) === Math.floor(ip4n(r) / passo); }
+
+// ---------- CVE: explorada de fato? (CISA KEV) e onde foi vista (CIRCL) ----------
+export async function cveExploracao(ctx, id) {
+  const props = {}, out = [];
+  let kev = null;
+  try {
+    const cat = await lista(ctx, 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json', 12, (r) => new Map((JSON.parse(r.texto).vulnerabilities || []).map((v) => [v.cveID, v])));
+    kev = cat.get(id) || null;
+  } catch { props['CISA KEV'] = 'catálogo fora do ar'; }
+  if (kev) {
+    Object.assign(props, { 'CISA KEV': `explorada de fato (no catálogo desde ${kev.dateAdded})`, ransomware: kev.knownRansomwareCampaignUse === 'Known' ? 'usada em campanhas de ransomware' : 'sem uso conhecido em ransomware', 'correção exigida até': kev.dueDate, 'o que fazer': kev.requiredAction, fraquezas: (kev.cwes || []).join(', ') });
+    if (kev.vendorProject) out.push(ent('organizacao', kev.vendorProject, 'fornecedor afetado', { props: { produto: kev.product } }));
+  } else if (!props['CISA KEV']) props['CISA KEV'] = 'não está no catálogo de exploradas';
+  try {
+    const s = await ctx.json(`https://vulnerability.circl.lu/api/sighting/?vuln_id=${encodeURIComponent(id)}&per_page=20`);
+    const n = (s && s.metadata && s.metadata.count) || 0;
+    const tipos = {};
+    for (const x of (s && s.data) || []) tipos[x.type] = (tipos[x.type] || 0) + 1;
+    const ult = ((s && s.data) || []).map((x) => (x.source || '').match(/\((\d{4}-\d{2}-\d{2})\)/)).filter(Boolean).map((m) => m[1]).sort().pop();
+    props['avistamentos (CIRCL)'] = n ? `${n}${Object.keys(tipos).length ? ` (${Object.entries(tipos).map(([k, q]) => `${k}: ${q}`).join(', ')} nos últimos)` : ''}${ult ? `, o mais recente em ${ult}` : ''}` : 'nenhum';
+  } catch {}
+  const alerta = !!kev;
+  if (alerta) props.risco = `explorada de fato${kev.knownRansomwareCampaignUse === 'Known' ? ', inclusive por ransomware' : ''}: corrija primeiro`;
+  return { entidades: out, props, alerta };
+}
+
+// ---------- hash: arquivo conhecido? (CIRCL hashlookup, com a base NSRL) ----------
+export async function hashlookup(ctx, hash) {
+  const alg = hash.length === 32 ? 'md5' : hash.length === 40 ? 'sha1' : 'sha256';
+  const d = await ctx.json(`https://hashlookup.circl.lu/lookup/${alg}/${hash}`, { nulo404: true });
+  if (!d) return { entidades: [], aviso: 'Arquivo desconhecido do CIRCL hashlookup (não está nas bases de arquivos conhecidos).' };
+  const out = [];
+  for (const [k, a] of [['MD5', 'md5'], ['SHA-1', 'sha1'], ['SHA-256', 'sha256']]) if (d[k] && a !== alg) out.push(ent('hash', d[k], `mesmo arquivo (${k})`));
+  const fonte = d.source || (d['hashlookup:parent-total'] ? 'NSRL' : '');
+  return {
+    entidades: out, alerta: !!d.KnownMalicious,
+    props: { arquivo: d.FileName || '', tamanho: d.FileSize ? `${d.FileSize} bytes` : '', produto: d.ProductName || (d.parents && d.parents[0] && d.parents[0].ProductName) || '', origem: fonte, 'conhecido como malicioso': d.KnownMalicious || '', SSDEEP: d.SSDEEP || '', TLSH: d.TLSH || '', risco: d.KnownMalicious ? `listado como malicioso em ${d.KnownMalicious}` : '' },
+  };
+}
+
+// ---------- domínio: credenciais roubadas por infostealer (Hudson Rock) ----------
+export async function infostealer(ctx, dominio) {
+  const d = await ctx.json(`https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-domain?domain=${encodeURIComponent(dominio)}`, { timeout: 40000 });
+  if (!d || !d.total) return { entidades: [], props: { infostealer: 'nenhum computador infectado conhecido com acesso a este domínio' } };
+  const urls = ((d.data && d.data.employees_urls) || []).filter((u) => { try { return new URL(u.url).hostname.endsWith(dominio); } catch { return false; } }).sort((a, b) => b.occurrence - a.occurrence).slice(0, 10);
+  const out = urls.map((u) => ent('url', u.url, 'login vazado por infostealer', { alerta: true, props: { ocorrências: u.occurrence } }));
+  const alerta = (d.employees || 0) > 0;
+  return {
+    entidades: out, alerta,
+    props: { 'funcionários infectados': d.employees || 0, 'usuários infectados': d.users || 0, 'terceiros': d.third_parties || 0, 'última infecção de funcionário': data(d.last_employee_compromised), 'famílias de infostealer': Object.keys(d.stealerFamilies || {}).slice(0, 5).join(', '), fonte: 'Hudson Rock (cite a fonte)', risco: alerta ? `${d.employees} computadores de funcionários infectados por infostealer: senhas e sessões da empresa podem estar à venda` : '' },
+  };
+}
+
+// ---------- domínio, IP: varreduras públicas do urlscan.io (páginas, IPs, capturas de tela) ----------
+export async function urlscan(ctx, valor, tipo) {
+  const q = tipo === 'ip' ? `ip:${valor}` : tipo === 'hash' ? `hash:${valor}` : `domain:${valor}`;
+  const d = await ctx.json(`https://urlscan.io/api/v1/search/?q=${encodeURIComponent(q)}&size=20`);
+  const res = (d && d.results) || [];
+  const out = [];
+  for (const r of res) {
+    const t = r.task || {}, p = r.page || {};
+    if (t.url) out.push(ent('url', t.url, 'varrido no urlscan', { props: { quando: data(t.time), 'captura de tela': r.screenshot || '', varredura: r.result ? r.result.replace('/api/v1/result/', '/result/') : '', 'servidor': p.server || '', país: p.country || '' } }));
+    if (tipo !== 'ip' && p.ip) out.push(ent('ip', p.ip, 'servia a página (urlscan)'));
+    if (tipo === 'ip' && p.domain) out.push(ent('dominio', p.domain, 'página neste IP (urlscan)'));
+  }
+  return { ...corta(unicos(out), ctx), props: { 'varreduras no urlscan (30 dias)': (d && d.total) || 0 }, aviso: res.length ? '' : 'Nenhuma varredura pública nos últimos 30 dias.' };
+}
+
+// ---------- domínio: popularidade (Tranco), URLs no Common Crawl, segurança do e-mail ----------
+export async function popularidade(ctx, dominio) {
+  const d = await ctx.json(`https://tranco-list.eu/api/ranks/domain/${encodeURIComponent(dominio)}`);
+  const r = (d && d.ranks) || [];
+  if (!r.length) return { entidades: [], props: { 'popularidade (Tranco)': 'fora do 1 milhão de sites mais acessados' } };
+  const atual = r[0].rank, pior = Math.max(...r.map((x) => x.rank)), melhor = Math.min(...r.map((x) => x.rank));
+  return { entidades: [], props: { 'popularidade (Tranco)': `${atual.toLocaleString('pt-BR')}º do mundo (${r[0].date})`, 'variação recente': melhor === pior ? 'estável' : `entre ${melhor.toLocaleString('pt-BR')}º e ${pior.toLocaleString('pt-BR')}º` } };
+}
+export async function commonCrawl(ctx, dominio) {
+  const col = await lista(ctx, 'https://index.commoncrawl.org/collinfo.json', 24, (r) => JSON.parse(r.texto));
+  const indice = col && col[0] && col[0].id;
+  if (!indice) throw new Falha('Índice do Common Crawl indisponível.', { status: 503 });
+  const r = await ctx.pagina(`https://index.commoncrawl.org/${indice}-index?url=${encodeURIComponent(dominio + '/*')}&output=json&limit=400`, { timeout: 60000 });
+  if (r.status === 404) return { entidades: [], aviso: `Nada do domínio no Common Crawl mais recente (${indice}).` };
+  const regs = String(r.texto).split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && x.url && !/\.(css|js|png|jpe?g|gif|svg|woff2?|ico|webp)(\?|$)/i.test(x.url));
+  const vistos = new Map(regs.map((x) => [x.url.replace(/[?#].*$/, ''), x]));
+  const ord = [...vistos.values()].sort((a, b) => Number(CURIOSOS.test(b.url)) - Number(CURIOSOS.test(a.url)));
+  const hosts = new Set(ord.map((x) => { try { return new URL(x.url).hostname; } catch { return ''; } }).filter((h) => h.endsWith('.' + dominio)));
+  return { ...corta([...ord.map((x) => ent('url', x.url, 'no Common Crawl', { alerta: CURIOSOS.test(x.url), props: { capturado: x.timestamp ? `${x.timestamp.slice(0, 4)}-${x.timestamp.slice(4, 6)}-${x.timestamp.slice(6, 8)}` : '', status: x.status || '', idioma: x.languages || '' } })), ...[...hosts].map((h) => ent('dominio', h, 'subdomínio no Common Crawl'))], ctx), props: { 'Common Crawl': `${vistos.size} endereços no índice ${indice}` } };
+}
+const SELETORES_DKIM = ['google', 'selector1', 'selector2', 'k1', 'k2', 'default', 's1', 's2', 'mail', 'dkim', 'mandrill', 'zoho'];
+export async function segurancaEmail(ctx, dominio) {
+  const txt = async (nome) => (await dns(ctx, nome, 'TXT').catch(() => [])).map(tiraAspas);
+  const [dmarc, sts, tlsrpt, bimi] = await Promise.all([txt('_dmarc.' + dominio), txt('_mta-sts.' + dominio), txt('_smtp._tls.' + dominio), txt('default._bimi.' + dominio)]);
+  const dkim = (await Promise.all(SELETORES_DKIM.map(async (s) => ((await txt(`${s}._domainkey.${dominio}`)).some((t) => /p=/.test(t)) ? s : null)))).filter(Boolean);
+  // DNSSEC: o resolvedor da Cloudflare marca AD quando a cadeia de assinaturas confere
+  let dnssec = '?';
+  try { const r = await ctx.json(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(dominio)}&type=A&do=1`, { headers: { accept: 'application/dns-json' } }); dnssec = r && r.AD ? 'sim (assinado e validado)' : 'não'; } catch {}
+  const d = dmarc.find((t) => /^v=DMARC1/i.test(t)) || '';
+  const politica = (d.match(/\bp=(\w+)/i) || [])[1] || '';
+  const out = [];
+  for (const m of d.matchAll(/mailto:([^,;\s!]+)/gi)) out.push(ent('email', m[1], 'recebe os relatórios DMARC'));
+  let stsModo = '';
+  if (sts.some((t) => /v=STSv1/i.test(t))) { try { const p = await ctx.pagina(`https://mta-sts.${dominio}/.well-known/mta-sts.txt`); stsModo = (String(p.texto).match(/mode:\s*(\w+)/) || [])[1] || 'publicado'; } catch { stsModo = 'registro existe, política não abre'; } }
+  const problemas = [!d ? 'sem DMARC (o domínio pode ser falsificado em e-mails)' : politica === 'none' ? 'DMARC só monitora (p=none): e-mail falso ainda chega' : '', !dkim.length ? 'nenhum seletor DKIM comum achado' : ''].filter(Boolean);
+  return {
+    entidades: unicos(out), alerta: !d || politica === 'none',
+    props: { DMARC: d ? `${politica || '?'} (${d.slice(0, 120)})` : 'não tem', 'DKIM (seletores achados)': dkim.join(', ') || 'nenhum dos comuns', 'MTA-STS': stsModo || 'não tem', 'TLS-RPT': tlsrpt.find((t) => /v=TLSRPTv1/i.test(t)) || 'não tem', BIMI: bimi.find((t) => /v=BIMI1/i.test(t)) ? 'tem (logo nos e-mails)' : 'não tem', DNSSEC: dnssec, risco: problemas.join('; ') },
+  };
+}
+
+// ---------- ASN: perfil no PeeringDB (site, IXs, data centers) ----------
+export async function peeringdb(ctx, asn) {
+  const n = asn.replace(/^AS/i, '');
+  const d = await ctx.json(`https://www.peeringdb.com/api/net?asn=${n}`, { nulo404: true });
+  const x = d && d.data && d.data[0];
+  if (!x) return { entidades: [], aviso: 'Este sistema autônomo não está no PeeringDB.' };
+  const out = [];
+  if (x.website) out.push(ent('url', x.website, 'site no PeeringDB'));
+  if (x.name) out.push(ent('organizacao', x.name, 'rede no PeeringDB'));
+  return { entidades: unicos(out), props: { 'também conhecido como': x.aka || '', 'pontos de troca (IX)': x.ix_count, 'data centers': x.fac_count, 'tipo de rede': x.info_type || '', 'tráfego': x.info_traffic || '', 'AS-SET': x.irr_as_set || '', PeeringDB: `https://www.peeringdb.com/net/${x.id}` } };
+}
+
 // ---------- VirusTotal (opcional: chave no Cofre) ----------
 const VT = 'https://www.virustotal.com/api/v3/';
 async function vt(ctx, caminho) {
@@ -1231,6 +1640,10 @@ export const TRANSFORMACOES = [
   { id: 'rdap-dominio', de: ['dominio'], nome: 'Registro (RDAP/WHOIS)', fonte: 'rdap.org', rapida: true, run: rdapDominio },
   { id: 'subdominios', de: ['dominio'], nome: 'Subdomínios (certificados, DNS e arquivo)', fonte: 'crt.sh, certspotter, HackerTarget, Wayback', run: subdominios },
   { id: 'explorar-site', de: ['dominio'], nome: 'Explorar o site: robots, sitemap, JavaScript, arquivos expostos', fonte: 'o próprio site', run: explorarSite },
+  { id: 'seguranca-email', de: ['dominio'], nome: 'Segurança do e-mail: DMARC, DKIM, MTA-STS, BIMI, DNSSEC', fonte: 'DNS', rapida: true, run: segurancaEmail },
+  { id: 'infostealer', de: ['dominio'], nome: 'Credenciais roubadas por infostealer', fonte: 'Hudson Rock', run: infostealer },
+  { id: 'popularidade', de: ['dominio'], nome: 'Popularidade no mundo', fonte: 'Tranco', rapida: true, run: popularidade },
+  { id: 'common-crawl', de: ['dominio'], nome: 'Endereços no Common Crawl', fonte: 'Common Crawl', run: commonCrawl },
   { id: 'documentos', de: ['dominio'], nome: 'Documentos públicos e metadados (autores, usuários)', fonte: 'o próprio site + Wayback', run: documentos },
   { id: 'rastreadores', de: ['dominio'], nome: 'IDs de rastreamento (Analytics, AdSense, Pixel)', fonte: 'o próprio site', rapida: true, run: rastreadores },
   { id: 'site', de: ['dominio'], nome: 'Ler o site (e-mails, perfis, links)', fonte: 'o próprio site', run: site },
@@ -1244,29 +1657,45 @@ export const TRANSFORMACOES = [
   { id: 'geo', de: ['ip'], nome: 'Localização e provedor', fonte: 'ipwho.is', rapida: true, run: geo },
   { id: 'internetdb', de: ['ip'], nome: 'Portas abertas e vulnerabilidades', fonte: 'Shodan InternetDB', rapida: true, run: internetdb },
   { id: 'mesmo-ip', de: ['ip'], nome: 'Domínios no mesmo IP (DNS passivo e reverso)', fonte: 'AlienVault OTX + HackerTarget', run: mesmoIP },
+  { id: 'ip-reputacao', de: ['ip'], nome: 'Reputação: varredura, listas de ameaça, Tor, spam, Spamhaus', fonte: 'GreyNoise, SANS ISC, Tor, StopForumSpam, Spamhaus', rapida: true, run: ipReputacao },
+  { id: 'urlscan', de: ['dominio', 'ip'], nome: 'Varreduras públicas (páginas, IPs, capturas de tela)', fonte: 'urlscan.io', run: urlscan },
   { id: 'rdap-ip', de: ['ip', 'rede'], nome: 'Dono do bloco (RDAP)', fonte: 'rdap.org', run: rdapIP },
   { id: 'asn-prefixos', de: ['asn'], nome: 'Prefixos anunciados', fonte: 'RIPEstat', run: asnPrefixos },
   { id: 'asn-dono', de: ['asn'], nome: 'Quem opera o sistema autônomo', fonte: 'RIPEstat', rapida: true, run: asnDono },
+  { id: 'peeringdb', de: ['asn'], nome: 'Perfil da rede: site, pontos de troca, data centers', fonte: 'PeeringDB', run: peeringdb },
   { id: 'asn-vizinhos', de: ['asn'], nome: 'Vizinhos (trânsito)', fonte: 'RIPEstat', run: asnVizinhos },
   { id: 'url-dominio', de: ['url'], nome: 'Domínio da URL', fonte: 'local', rapida: true, run: urlDominio },
   { id: 'github-repo', de: ['url'], nome: 'Repositório do GitHub (dono, contribuidores, e-mails)', fonte: 'GitHub', run: githubRepo },
   { id: 'url-seguir', de: ['url'], nome: 'Seguir redirecionamentos e ler cabeçalhos', fonte: 'o próprio site', rapida: true, run: urlSeguir },
   { id: 'email-dominio', de: ['email'], nome: 'Domínio do e-mail (e se ele recebe)', fonte: 'DNS', rapida: true, run: emailDominio },
+  { id: 'pgp-email', de: ['email'], nome: 'Chaves PGP: nome real e outros e-mails da pessoa', fonte: 'keys.openpgp.org + keyserver.ubuntu.com', rapida: true, run: pgpEmail },
   { id: 'gravatar', de: ['email'], nome: 'Perfil no Gravatar', fonte: 'Gravatar', rapida: true, run: gravatar },
   { id: 'email-github', de: ['email'], nome: 'Contas do GitHub que usam o e-mail', fonte: 'GitHub', rapida: true, run: emailGithub },
   { id: 'nome-apelidos', de: ['pessoa'], nome: 'Apelidos prováveis', fonte: 'local', run: nomeApelidos },
   { id: 'emails-provaveis', de: ['pessoa'], nome: 'E-mails prováveis nos domínios ligados', fonte: 'DNS + Gravatar', run: emailsProvaveis },
+  { id: 'ibge-nome', de: ['pessoa'], nome: 'Quantas pessoas têm o primeiro nome (risco de homônimo)', fonte: 'IBGE (Censo)', rapida: true, run: nomeIbge },
+  { id: 'openalex', de: ['pessoa'], nome: 'Pesquisador: ORCID, instituição e citações', fonte: 'OpenAlex', run: openalex },
+  { id: 'pgp-nome', de: ['pessoa'], nome: 'Chaves PGP com este nome', fonte: 'keyserver.ubuntu.com', run: pgpNome },
+  { id: 'bluesky-busca', de: ['pessoa'], nome: 'Contas no Bluesky com este nome', fonte: 'Bluesky', run: blueskyBusca },
+  { id: 'deputado', de: ['pessoa'], nome: 'Deputado(a) federal: partido, estado, e-mail do gabinete', fonte: 'Câmara dos Deputados', run: deputado },
+  { id: 'fediverso', de: ['pessoa', 'apelido'], nome: 'Contas no fediverso (Mastodon e outras instâncias)', fonte: 'mastodon.social', run: fediverso },
+  { id: 'launchpad', de: ['pessoa', 'apelido'], nome: 'Conta no Launchpad: apelidos de IRC e chaves', fonte: 'Launchpad', run: launchpad },
+  { id: 'stackexchange', de: ['pessoa', 'apelido'], nome: 'Perfil no Stack Overflow e contas da rede', fonte: 'Stack Exchange (300 por dia)', run: stackexchange },
   { id: 'pessoa-wikidata', de: ['pessoa'], nome: 'Pessoa pública: cargos, onde trabalha, contas oficiais', fonte: 'Wikidata', rapida: true, run: pessoaWikidata },
   { id: 'orcid', de: ['pessoa'], nome: 'Pesquisador com este nome e instituição', fonte: 'ORCID', run: orcid },
   { id: 'github-nome', de: ['pessoa'], nome: 'Contas do GitHub com este nome', fonte: 'GitHub', run: githubNome },
   { id: 'wikipedia', de: ['pessoa', 'organizacao'], nome: 'Artigos da Wikipédia que citam o nome', fonte: 'Wikipédia', run: wikipedia },
   { id: 'contas-amplo', de: ['apelido'], nome: 'Contas em centenas de sites (regras do Maigret)', fonte: `até ${sitesMaigret().length} sites`, run: contasAmplo },
+  { id: 'hacker-news', de: ['apelido'], nome: 'Atividade no Hacker News e sites que divulga', fonte: 'Algolia HN', run: hackerNews },
+  { id: 'npm', de: ['apelido'], nome: 'Pacotes, repositórios e e-mail no npm', fonte: 'npm', run: npmMantenedor },
+  { id: 'wikimedia', de: ['apelido'], nome: 'Conta global da Wikimedia (todas as wikis)', fonte: 'Wikimedia', run: wikimediaGlobal },
   { id: 'contas', de: ['apelido'], nome: 'Procurar contas com este nome', fonte: `${SITES.length} sites`, rapida: true, run: contas },
   { id: 'github', de: ['apelido'], nome: 'Perfil, e-mails dos commits e chaves no GitHub', fonte: 'GitHub', run: github },
   { id: 'github-rede', de: ['apelido'], nome: 'Rede no GitHub (seguidores, seguidos, membros)', fonte: 'GitHub', run: githubRede },
   { id: 'github-repos', de: ['apelido'], nome: 'Repositórios, linguagens e organizações', fonte: 'GitHub', run: githubRepos },
+  { id: 'orcid-perfil', de: ['conta'], so: /orcid\.org\//, soAviso: 'Só serve para contas do ORCID.', nome: 'Perfil completo do ORCID (empregos, sites, e-mails)', fonte: 'ORCID', run: orcidPerfil },
   { id: 'conta-apelido', de: ['conta'], nome: 'Nome de usuário da conta', fonte: 'local', rapida: true, run: contaApelido },
-  { id: 'telefone', de: ['telefone'], nome: 'Tipo, região e apps de mensagem', fonte: 'local', rapida: true, run: telefone },
+  { id: 'telefone', de: ['telefone'], nome: 'Tipo, região, cidades do DDD e apps de mensagem', fonte: 'local + BrasilAPI', rapida: true, run: telefone },
   { id: 'web', de: ['telefone', 'email', 'apelido', 'pessoa', 'cnpj', 'organizacao', 'dominio', 'cripto', 'hash'], nome: 'Procurar na web', fonte: 'DuckDuckGo (Bing de reserva)', run: web },
   { id: 'wikidata', de: ['organizacao'], nome: 'Site oficial, sede, donos e fundadores', fonte: 'Wikidata', rapida: true, run: wikidata },
   { id: 'cnpj', de: ['cnpj'], nome: 'Razão social, sócios, endereço, regime e matriz', fonte: 'Receita (BrasilAPI ou Minha Receita)', rapida: true, run: cnpj },
@@ -1276,8 +1705,10 @@ export const TRANSFORMACOES = [
   { id: 'cep', de: ['cep'], nome: 'Endereço e coordenadas', fonte: 'BrasilAPI', rapida: true, run: cep },
   { id: 'coordenadas', de: ['local'], nome: 'Coordenadas e mapa', fonte: 'OpenStreetMap', rapida: true, run: coordenadas },
   { id: 'bitcoin', de: ['cripto'], nome: 'Saldo e carteiras ligadas', fonte: 'Blockstream', rapida: true, run: bitcoin },
+  { id: 'cve-exploracao', de: ['cve'], nome: 'Explorada de fato? (CISA KEV) e avistamentos', fonte: 'CISA + CIRCL', rapida: true, run: cveExploracao },
   { id: 'cve', de: ['cve'], nome: 'Detalhes, CVSS e EPSS', fonte: 'MITRE + FIRST', rapida: true, run: cve },
   { id: 'texto-entidades', de: ['texto'], nome: 'Extrair entidades do texto', fonte: 'local', rapida: true, run: textoEntidades },
+  { id: 'hashlookup', de: ['hash'], nome: 'Arquivo conhecido? Nome e os outros hashes', fonte: 'CIRCL hashlookup', rapida: true, run: hashlookup },
   { id: 'otx', de: ['ip', 'dominio', 'hash', 'url'], nome: 'Relatórios de ameaça', fonte: 'AlienVault OTX', rapida: true, run: otx },
   { id: 'virustotal', de: ['dominio', 'ip', 'hash', 'url'], nome: 'Reputação no VirusTotal', fonte: 'VirusTotal (chave no Cofre)', cofre: 'bluetego.virustotal', run: virustotal },
 ];
@@ -1292,6 +1723,7 @@ export async function rodar(id, tipo, valor, ctx, completo) {
   if (!v) throw new Falha('valor vazio');
   if (tipo === 'ip' && !ehIP(v)) throw new Falha(`"${v}" não é um endereço IP`);
   if (tipo === 'dominio' && detectar(v) !== 'dominio') throw new Falha(`"${v}" não parece um domínio`);
+  if (t.so && !t.so.test(v)) return { entidades: [], props: {}, aviso: t.soAviso || 'Esta transformação não serve para este valor.', alerta: false };
   const r = (await t.run(ctx, v, tipo === 'texto' ? completo : tipo)) || {};
   // cada entidade sai com o id (a forma canônica): é por ele que a página junta o que já está no grafo
   const entidades = unicos((r.entidades || []).filter((e) => e.valor && !(e.tipo === tipo && e.valor === v && !e.de)))

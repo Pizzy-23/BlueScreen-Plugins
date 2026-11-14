@@ -92,8 +92,8 @@ caso('Receita: razão social, sócios, endereço e situação', async () => {
   for (const id of ['organizacao:empresa x sa', 'organizacao:x', 'pessoa:ana souza', 'cnpj:11.222.333/0001-81', 'telefone:+555133334444', 'email:x@x.com']) assert.ok(ids.includes(id), id + ' em ' + ids);
   assert.ok(r.alerta); assert.match(r.props.risco, /baixada/);
 });
-caso('catálogo: 56 transformações e 12 máquinas que só usam transformações que existem', () => {
-  assert.equal(TRANSFORMACOES.length, 56);
+caso('catálogo: ids únicos e máquinas que só usam transformações que existem', () => {
+  assert.equal(new Set(TRANSFORMACOES.map((t) => t.id)).size, TRANSFORMACOES.length);
   assert.equal(MAQUINAS.length, 12);
   for (const m of MAQUINAS) for (const p of m.passos) assert.ok(TRANSFORMACOES.some((t) => t.id === p.t), `${m.id}: ${p.t}`);
 });

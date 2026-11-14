@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.3.0 |
+| **Versão** | 0.4.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 56 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 78 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -91,6 +91,11 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 |---|---|---|
 | Domínio | ⚡ Resolver IPs (A, AAAA, CNAME) · ⚡ MX · ⚡ NS | DNS sobre HTTPS (Google, Cloudflare de reserva) |
 | Domínio | ⚡ TXT, SPF e DMARC: os serviços que a empresa usa e quem pode mandar e-mail por ela | DNS |
+| Domínio | ⚡ Segurança do e-mail: DMARC (política e quem recebe os relatórios), seletores DKIM, MTA-STS, TLS-RPT, BIMI, DNSSEC | DNS |
+| Domínio | Credenciais roubadas por infostealer: funcionários e usuários infectados, logins vazados da empresa | Hudson Rock |
+| Domínio | ⚡ Popularidade no mundo (ranking e variação) | Tranco |
+| Domínio | Endereços no Common Crawl (segunda fonte de URLs antigas, independente da Wayback) | Common Crawl |
+| Domínio, IP | Varreduras públicas: páginas, IPs que serviam, capturas de tela (últimos 30 dias) | urlscan.io |
 | Domínio | ⚡ Registro (RDAP/WHOIS): registrante, registrador, contatos, datas e o CNPJ do titular (.br) | rdap.org |
 | Domínio | ⚡ Tecnologias do site (servidor, CMS, frameworks, CDN, análise), com a versão exposta | o próprio site |
 | Domínio | ⚡ Certificado TLS: emissor, validade, outros nomes do certificado | o próprio site |
@@ -103,20 +108,29 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Domínio | Endereços arquivados, primeiro os que interessam (backups, painéis, APIs, `.env`) | Wayback Machine |
 | Domínio | Contatos de segurança: `security.txt` e o responsável no SOA | o próprio site + DNS |
 | Domínio | Domínios parecidos registrados (letra trocada, final diferente, palavra a mais, até 260 variações) | DNS |
-| IP | ⚡ DNS reverso · ⚡ sistema autônomo e prefixo · ⚡ localização e provedor (aproximada) | DNS, RIPEstat, ipwho.is |
+| IP | ⚡ DNS reverso · ⚡ sistema autônomo e prefixo (Team Cymru de reserva) · ⚡ localização e provedor (aproximada) | DNS, RIPEstat, Team Cymru, ipwho.is |
+| IP | ⚡ Reputação: varre a internet? (GreyNoise), em quais listas de ameaça está e quem cuida de abuso (SANS ISC), relay do Tor, spam (StopForumSpam), rede de criminosos (Spamhaus DROP) | GreyNoise, SANS ISC, Tor Onionoo, StopForumSpam, Spamhaus |
 | IP | ⚡ Portas abertas e vulnerabilidades | Shodan InternetDB |
 | IP | Domínios que apontam ou já apontaram para o IP (DNS passivo e reverso) | AlienVault OTX + HackerTarget |
 | IP, rede | Dono do bloco (RDAP) | rdap.org |
 | Sistema autônomo | ⚡ Quem opera · prefixos anunciados · vizinhos (quem dá e recebe trânsito) | RIPEstat |
+| Sistema autônomo | Perfil da rede: site, pontos de troca, data centers, AS-SET | PeeringDB |
 | IP, domínio, hash, URL | ⚡ Relatórios de ameaça · reputação no VirusTotal (chave no Cofre) | AlienVault OTX, VirusTotal |
+| Hash | ⚡ Arquivo conhecido? Nome, tamanho, produto, se é malicioso, e os outros hashes do mesmo arquivo | CIRCL hashlookup |
 | URL | ⚡ Domínio da URL · ⚡ seguir redirecionamentos e ler cabeçalhos | local, o próprio site |
 | URL | Repositório do GitHub: dono, contribuidores, e-mails dos commits, site, tópicos | GitHub |
 | E-mail | ⚡ Domínio do e-mail (e se ele recebe) · ⚡ perfil no Gravatar · ⚡ contas do GitHub que fazem commits com ele | DNS, Gravatar, GitHub |
-| Apelido | ⚡ Contas com este nome em 18 sites, com nome, cidade, empresa e site de cada perfil; provas do Keybase | APIs dos sites |
+| E-mail | ⚡ Chaves PGP: nome real e os outros e-mails da mesma chave (verificados no keys.openpgp.org, autodeclarados no keyserver.ubuntu.com) | servidores de chaves PGP |
+| Apelido | Atividade no Hacker News e os sites que o apelido mais divulga · pacotes, repositórios e o e-mail público no npm · conta global da Wikimedia (todas as wikis) | Algolia HN, npm, Wikimedia |
+| Apelido, pessoa | Launchpad (apelidos de IRC e chaves GPG) · fediverso (Mastodon e outras instâncias) · Stack Overflow e as contas da mesma pessoa na rede Stack Exchange | Launchpad, mastodon.social, Stack Exchange |
+| Apelido | ⚡ Contas com este nome em 19 sites, com nome, cidade, empresa e site de cada perfil; provas do Keybase | APIs dos sites |
 | Apelido | Contas em centenas de sites (até 2.434, os mais conhecidos primeiro), cada achado reconferido | regras do Maigret |
 | Apelido | GitHub a fundo: e-mails dos commits e das chaves GPG, chaves SSH, repositórios, linguagens, organizações, quem segue e é seguido | GitHub |
 | Conta | ⚡ Nome de usuário da conta (para procurar o mesmo nome em outros sites) | local |
 | Pessoa | ⚡ Pessoa pública: cargos, onde trabalha e estudou, contas oficiais | Wikidata |
+| Pessoa | ⚡ Quantas pessoas no Brasil têm o primeiro nome (risco de homônimo) e a década mais comum de nascimento | IBGE (Censo) |
+| Pessoa | Pesquisador: ORCID, instituição e citações · chaves PGP com o nome · contas no Bluesky com o nome · deputado(a) federal | OpenAlex, keyserver.ubuntu.com, Bluesky, Câmara dos Deputados |
+| Conta (ORCID) | Perfil completo do ORCID: empregos com cargo e ano, sites, e-mails públicos, outros nomes | ORCID |
 | Pessoa | E-mails prováveis nos domínios ligados à pessoa, confirmados no Gravatar | DNS + Gravatar |
 | Pessoa | Pesquisador com o nome e a instituição · contas do GitHub com o nome · artigos da Wikipédia · apelidos prováveis | ORCID, GitHub, Wikipédia, local |
 | Organização | ⚡ Site oficial, sede, donos, fundadores · artigos da Wikipédia | Wikidata, Wikipédia |
@@ -127,6 +141,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Local | ⚡ Coordenadas e mapa | OpenStreetMap |
 | Carteira cripto | ⚡ Saldo e as carteiras que mais mandaram e receberam | Blockstream |
 | Vulnerabilidade | ⚡ Resumo, CVSS e EPSS (chance de exploração) | MITRE + FIRST |
+| Vulnerabilidade | ⚡ Explorada de fato? (catálogo KEV, inclusive uso em ransomware e o prazo de correção) e avistamentos recentes | CISA + CIRCL |
 | Texto | ⚡ Extrair entidades | local |
 | Telefone, e-mail, apelido, pessoa, CNPJ, organização, domínio, carteira, hash | Procurar na web (telefone em todos os jeitos de escrever) | DuckDuckGo (Bing de reserva) |
 | Domínio, pessoa, e-mail, telefone, apelido, CNPJ, organização | Buscas prontas (dorks) para abrir no navegador: documentos, painéis, listagens, backups, vazamentos em Pastebin e nuvem | local |
@@ -177,6 +192,8 @@ Aba Plugins › engrenagem do Bluetego:
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
 - **CPF:** o Bluetego valida o CPF e mostra a região fiscal de emissão, e cruza com o CPF mascarado que a Receita publica dos sócios. Ele **não** descobre de quem é um CPF nem procura CPF na web: as fontes que fazem isso usam bases vazadas, e o Bluetego não usa.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
+- **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
+- **E-mail escondido não é revelado:** o Launchpad acha a conta de um e-mail mesmo quando o dono escolheu escondê-lo, e por isso o Bluetego só consulta o Launchpad por nome e apelido. Nome em chave PGP do keyserver.ubuntu.com é autodeclarado (qualquer um publica uma chave com qualquer nome), e a ligação diz isso.
 - **Para onde vão os valores:** cada transformação manda o valor à fonte da tabela acima. "Ler o site", "Tecnologias", "Certificado" e "Seguir redirecionamentos" acessam o próprio site do alvo, que vê o seu IP.
 - **IA:** o resumo do grafo (valores, propriedades e anotações) vai para o provedor escolhido. Com os Agentes de IA da IDE ou a API da Anthropic, ele sai do PC; com o Ollama, não sai.
 - **Onde ficam as investigações:** `~/.bluescreen/plugin-data/bluetego/files/investigacoes/`, uma por arquivo JSON. As exportações vão para `files/exportacoes/`, e o Explorer abre na pasta.
@@ -189,6 +206,8 @@ Aba Plugins › engrenagem do Bluetego:
 - Sem token, a API do GitHub aceita 60 consultas por hora (o Rastro do apelido gasta cerca de 10).
 - O Querido Diário (diários oficiais municipais) ficou de fora por enquanto: a API estava fora do ar.
 - A HackerTarget (DNS reverso, subdomínios e IDs de rastreamento) deixa 50 consultas gratuitas por dia; quando acabam, a transformação avisa.
+- Outras cotas gratuitas: GreyNoise (25 consultas), Stack Exchange (300 por dia), urlscan (30 por minuto e só os últimos 30 dias), Tranco (1 por segundo).
+- Ficaram de fora por não serem confiáveis sem chave: abuse.ch (MalwareBazaar, URLhaus, ThreatFox passaram a exigir chave), ransomware.live (respondia 404 para qualquer busca), BGPView (fora do ar), archive.today (bloqueia robôs), DBLP (desafio anti-robô).
 - Documentos no formato antigo (`.doc`, `.xls`) e PDFs criptografados não têm os metadados lidos.
 - Grafos com mais de 2.000 entidades ficam lentos para organizar; esconda tipos pela legenda ou recolha os resultados grandes.
 
@@ -198,6 +217,7 @@ Aba Plugins › engrenagem do Bluetego:
 node tests/logica.test.mjs
 node tests/novidades.test.mjs
 node tests/avancadas.test.mjs
+node tests/fontes.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -207,6 +227,14 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.4.0
+
+- **22 transformações novas com cerca de 30 fontes**, pesquisadas e testadas ao vivo (cada fonte com um valor que existe e um que não existe) antes de entrar:
+  - **Infraestrutura e ameaça:** reputação do IP num clique (GreyNoise, SANS ISC, Tor, StopForumSpam, Spamhaus DROP), CVE explorada de fato (CISA KEV, inclusive uso em ransomware) com os avistamentos do CIRCL, hash conhecido (CIRCL hashlookup), credenciais roubadas por infostealer (Hudson Rock), segurança do e-mail (DMARC, DKIM, MTA-STS, TLS-RPT, BIMI, DNSSEC), varreduras do urlscan, popularidade (Tranco), Common Crawl, PeeringDB, e o Team Cymru de reserva para IP→ASN.
+  - **Pessoas:** chaves PGP (nome real e outros e-mails), Launchpad, fediverso, Bluesky e Stack Exchange por nome, Hacker News, npm, conta global da Wikimedia, OpenAlex e o perfil completo do ORCID, quantas pessoas têm o primeiro nome (IBGE), deputados federais (Câmara), as cidades do DDD, Hugging Face nos sites de contas e a Wikipédia em inglês.
+- As máquinas de IP, ameaça, superfície de ataque, golpes, pegada do domínio, e-mail, apelido e pessoa usam as fontes novas.
+- Correção: o servidor não lia respostas do tipo `application/pgp-keys`.
 
 ### 0.3.0
 
