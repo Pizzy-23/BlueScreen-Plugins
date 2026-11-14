@@ -12,6 +12,7 @@ import { metadados } from './metadados.mjs';
 import { procurar as procurarMaigret, sitesMaigret } from './maigret.mjs';
 import { numeracao } from './numeracao.mjs';
 import { githubCommits } from './github.mjs';
+import { cpfTcu, transparencia } from './integridade.mjs';
 import { normalizar, chave, cnpjValido, regiaoCPF, telefoneInfo, nomeReverso, extrair, apelidosDeNome, ehIP, detectar } from './entidades.mjs';
 
 export class Falha extends Error {
@@ -2079,6 +2080,8 @@ export const TRANSFORMACOES = [
   { id: 'rastreador-sites', de: ['rastreador'], nome: 'Outros sites com o mesmo ID', fonte: 'HackerTarget (50 por dia)', rapida: true, run: rastreadorSites },
   { id: 'dorks', de: ['dominio', 'pessoa', 'email', 'telefone', 'apelido', 'cnpj', 'organizacao'], nome: 'Buscas prontas (dorks) para abrir no navegador', fonte: 'local', run: dorks },
   { id: 'cpf', de: ['cpf'], nome: 'Validar e ver a região fiscal', fonte: 'local', rapida: true, run: cpf },
+  { id: 'cpf-tcu', de: ['cpf'], nome: 'Inabilitado para cargo público ou proibido de licitar', fonte: 'TCU', rapida: true, run: cpfTcu },
+  { id: 'transparencia', de: ['cpf', 'cnpj'], nome: 'Sanções, PEP, servidor federal e contratos com o governo', fonte: 'Portal da Transparência (chave gratuita no Cofre)', cofre: 'bluetego.transparencia', run: transparencia },
   { id: 'cep', de: ['cep'], nome: 'Endereço e coordenadas', fonte: 'BrasilAPI', rapida: true, run: cep },
   { id: 'coordenadas', de: ['local'], nome: 'Coordenadas e mapa', fonte: 'OpenStreetMap', rapida: true, run: coordenadas },
   { id: 'bitcoin', de: ['cripto'], nome: 'Saldo e carteiras ligadas', fonte: 'Blockstream', rapida: true, run: bitcoin },

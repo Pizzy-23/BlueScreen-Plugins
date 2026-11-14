@@ -1,8 +1,8 @@
 {
   "id": "bluetego",
   "name": "Bluetego",
-  "description": "Investigação OSINT em grafo, no estilo do Maltego, sem conta e sem custo: 91 transformações em fontes públicas, contas em até 2.434 sites, sanções, processos e Diário Oficial por nome, reputação de IP, chaves PGP, metadados, pistas que aprendem e IA que conduz a investigação.",
-  "version": "0.8.0",
+  "description": "Investigação OSINT em grafo, no estilo do Maltego, sem conta e sem custo: 93 transformações em fontes públicas, contas em até 2.434 sites, sanções, processos e Diário Oficial por nome, reputação de IP, chaves PGP, metadados, pistas que aprendem e IA que conduz a investigação.",
+  "version": "0.9.0",
   "author": "Martin Hartfelder",
   "license": "MIT",
   "category": "outros",
@@ -23,6 +23,7 @@
   "vault": [
     { "key": "bluetego.virustotal", "label": "Bluetego: chave da API do VirusTotal", "title": "Chave do VirusTotal", "why": "a transformação \"Reputação no VirusTotal\" (opcional; a chave gratuita serve)", "hosts": ["www.virustotal.com"] },
     { "key": "bluetego.github", "label": "Bluetego: token do GitHub", "title": "Token do GitHub", "why": "as transformações do GitHub com 5.000 consultas por hora em vez de 60 (opcional; um token sem nenhuma permissão serve)", "hosts": ["api.github.com"] },
+    { "key": "bluetego.transparencia", "label": "Bluetego: chave da API do Portal da Transparência", "title": "Chave do Portal da Transparência", "why": "a verificação de CPF e CNPJ em sanções (CEIS, CNEP, CEAF), PEP, servidores federais e contratos (opcional; a chave é gratuita)", "hosts": ["api.portaldatransparencia.gov.br"] },
     { "key": "bluetego.anthropic", "label": "Bluetego: chave da API da Anthropic", "title": "Chave da API da Anthropic", "why": "a IA do Bluetego, quando você escolhe \"API da Anthropic\" nas configurações (opcional)", "hosts": ["api.anthropic.com"] }
   ]
 }

@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.8.0 |
+| **Versão** | 0.9.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 91 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 93 transformações usam fontes públicas e gratuitas. VirusTotal, Portal da Transparência, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -143,7 +143,8 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Pessoa | Pesquisador com o nome e a instituição · contas do GitHub com o nome · artigos da Wikipédia · apelidos prováveis | ORCID, GitHub, Wikipédia, local |
 | Organização | ⚡ Site oficial, sede, donos, fundadores · artigos da Wikipédia | Wikidata, Wikipédia |
 | CNPJ | ⚡ Razão social, nome fantasia, sócios (empresas sócias viram CNPJ), endereço, CEP, telefone, e-mail, regime (Simples, MEI), atividades, matriz da filial | Receita (BrasilAPI, com a Minha Receita de reserva) |
-| CPF | ⚡ Validar e ver a região fiscal de emissão | local |
+| CPF | ⚡ Validar e ver a região fiscal de emissão · ⚡ inabilitado para cargo público ou proibido de licitar | local, TCU |
+| CPF, CNPJ | Verificação de integridade: sanções (CEIS, CNEP), expulsão da administração federal (CEAF), pessoa politicamente exposta, servidor federal e contratos com o governo federal (PEP, servidor e CEAF só para CPF) | Portal da Transparência (chave gratuita no Cofre) |
 | CEP | ⚡ Endereço e coordenadas | BrasilAPI |
 | Telefone | ⚡ Tipo (celular, fixo, 0800, 4004), estado e região pelo DDD, operadora original da faixa, cidade do fixo pelo prefixo, os jeitos de escrever (inclusive o formato antigo de 8 dígitos do celular), links do WhatsApp, Telegram e Signal | local + libphonenumber |
 | Telefone | Organização que publica este telefone · estabelecimento com este telefone no mapa (nome, endereço, site, e-mail; leva até 1 minuto) | Wikidata, OpenStreetMap (Overpass) |
@@ -200,7 +201,8 @@ Aba Plugins › engrenagem do Bluetego:
 ## Segurança, dados e limites legais
 
 - **Use em alvos que você pode investigar**: a sua empresa, um cliente com contrato, um incidente que você está tratando. Pesquisar pessoas tem limites legais (no Brasil, a LGPD): use para fins legítimos e não guarde mais do que precisa.
-- **CPF:** o Bluetego valida o CPF e mostra a região fiscal de emissão, e cruza com o CPF mascarado que a Receita publica dos sócios. Ele **não** descobre de quem é um CPF nem procura CPF na web: as fontes que fazem isso usam bases vazadas, e o Bluetego não usa.
+- **CPF:** o Bluetego valida o CPF, mostra a região fiscal de emissão, cruza com o CPF mascarado que a Receita publica dos sócios e faz a verificação de integridade que compliance e due diligence fazem: condenação no TCU e, com a chave do Portal da Transparência, sanções, expulsões, PEP, servidor federal e contratos com o governo. O nome só aparece quando a própria fonte oficial o publica junto do CPF (condenado, sancionado, servidor, PEP). Ele **não** descobre de quem é um CPF: não consulta cadastro de pessoa física (nome, endereço, telefone) nem benefícios sociais, não usa bases vazadas e não procura CPF na web. Dado pessoal é protegido pela LGPD, e consulta de dono de CPF é a ferramenta de quem aplica golpe.
+- **Chave do Portal da Transparência:** gratuita, tirada com o e-mail em portaldatransparencia.gov.br/api-de-dados/cadastrar-email e guardada no Cofre da IDE (`bluetego.transparencia`). Sem ela, a transformação pede a chave.
 - **Checagens ativas:** "Explorar o site" pede ao servidor do alvo o `robots.txt`, o sitemap, os arquivos JavaScript da página e três caminhos que nunca deviam responder (`/.git/HEAD`, `/.env`, `/.DS_Store`). São pedidos comuns de leitura, mas aparecem no log do alvo: use só com autorização. Chaves achadas no JavaScript ficam **mascaradas** no grafo.
 - **Atribuição:** conteúdo do Stack Exchange e da Wikipédia é CC BY-SA, e o do SANS ISC é CC BY-NC-SA (uso não comercial); GreyNoise, Hudson Rock, CIRCL e Tranco pedem que a fonte seja citada. O ICIJ Offshore Leaks é ODbL e CC BY-SA, e o VIAF é ODC-By (citar a OCLC). A numeração de telefones vem do libphonenumber do Google (Apache-2.0, em `vendor/libphonenumber`), os dados do mapa são do OpenStreetMap (ODbL, © colaboradores do OpenStreetMap) e o Wikidata é CC0. O relatório exportado cita as fontes nas propriedades; cite-as também se publicar o resultado.
 - **E-mail escondido não é revelado:** o Launchpad acha a conta de um e-mail mesmo quando o dono escolheu escondê-lo, e por isso o Bluetego só consulta o Launchpad por nome e apelido. Nome em chave PGP do keyserver.ubuntu.com é autodeclarado (qualquer um publica uma chave com qualquer nome), e a ligação diz isso.
@@ -239,6 +241,7 @@ node tests/github.test.mjs
 node tests/bugs.test.mjs
 node tests/raciocinio.test.mjs
 node tests/inicio.test.mjs
+node tests/integridade.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -248,6 +251,13 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.9.0
+
+- **Verificação de integridade por CPF** (e CNPJ), só em fontes oficiais:
+  - condenação no TCU pelo CPF (inabilitado para cargo público ou proibido de licitar), sem chave, no primeiro olhar do CPF;
+  - com a chave gratuita do Portal da Transparência no Cofre: sanções (CEIS, CNEP), expulsão da administração federal (CEAF), pessoa politicamente exposta, servidor federal e contratos com o governo federal. Para CNPJ, sanções e contratos.
+- O Bluetego continua sem descobrir o dono de um CPF: não consulta cadastro de pessoa física nem benefícios sociais, não usa bases vazadas e não procura CPF na web (um teste garante isso).
 
 ### 0.8.0
 

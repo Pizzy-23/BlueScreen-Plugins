@@ -97,7 +97,7 @@ const ctxRede = {
       const r = await p.fetch(url, { headers: { 'user-agent': AGENTE, ...headers }, timeout: 25000 });
       return { status: r.status, ok: r.status >= 200 && r.status < 300, json: () => r.json() };
     } catch (e) {
-      throw new Falha('Falta liberar a chave do VirusTotal no Cofre (' + (e.message || e) + ').', { status: 403, codigo: 'cofre' });
+      throw new Falha('Falta liberar a chave no Cofre (' + (e.message || e) + ').', { status: 403, codigo: 'cofre' });
     }
   },
   // GitHub: com o token do Cofre (5.000 consultas por hora), pelo plugin.fetch da IDE; sem ele, direto (60 por hora)

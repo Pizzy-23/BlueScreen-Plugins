@@ -42,7 +42,7 @@ caso('poda: sem pedido ou resultado vazio passa igual', () => {
 
 // fontes que trazem homônimos ou dezenas de itens soltos não entram no primeiro olhar
 const BARULHENTAS = new Set(['contas-amplo', 'nome-apelidos', 'emails-provaveis', 'github-nome', 'bluesky-busca', 'fediverso', 'stackexchange', 'launchpad', 'wikipedia', 'subdominios', 'parecidos', 'mesmo-ip', 'explorar-site', 'documentos', 'wayback', 'common-crawl', 'certificado', 'dorks', 'tellows', 'imprensa', 'github-rede']);
-const PEQUENAS = new Set(['ibge-nome', 'sancoes', 'tcu', 'url-dominio']);
+const PEQUENAS = new Set(['ibge-nome', 'sancoes', 'tcu', 'url-dominio', 'cpf', 'cpf-tcu']);
 caso('roteiros coerentes com o catálogo: existem, servem, são curtos e podados', () => {
   for (const [tipo, passos] of Object.entries(INICIO)) {
     assert.ok(passos.length && passos.length <= 12, `${tipo}: roteiro curto`);

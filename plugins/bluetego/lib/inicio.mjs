@@ -35,6 +35,8 @@ export const INICIO = {
     { t: 'internetdb', max: 1, lim: 8 }, { t: 'otx', max: 1, tipos: ['ip'], so: [] },
   ],
   cnpj: [{ t: 'cnpj', max: 1, lim: 12 }],
+  // CPF: só o que é público por lei (validade, região fiscal, condenação no TCU); nunca o dono
+  cpf: [{ t: 'cpf', max: 1 }, { t: 'cpf-tcu', max: 1 }],
   organizacao: [{ t: 'wikidata', max: 1, lim: 8 }, { t: 'sancoes', max: 1, tipos: ['organizacao'] }],
 };
 
