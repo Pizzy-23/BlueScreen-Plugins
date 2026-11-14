@@ -16,6 +16,8 @@ function strPdf(bruto) {
       const c = s[i];
       if (c !== '\\') { out.push(s.charCodeAt(i) & 0xff); continue; }
       const n = s[++i];
+      // barra invertida no fim (texto cortado): não há o que escapar
+      if (n === undefined) break;
       if (/[0-7]/.test(n)) { let o = n; while (o.length < 3 && /[0-7]/.test(s[i + 1])) o += s[++i]; out.push(parseInt(o, 8) & 0xff); }
       else out.push({ n: 10, r: 13, t: 9, b: 8, f: 12 }[n] ?? n.charCodeAt(0));
     }
@@ -122,6 +124,6 @@ function achados(out, texto) {
 export function metadados(buf, nome = '') {
   if (!buf || !buf.length) return null;
   if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return metadadosPdf(buf);
-  if (buf.readUInt32LE(0) === 0x04034b50 && /\.(docx|xlsx|pptx|odt|ods|odp)$/i.test(nome || '.docx')) return metadadosOffice(buf);
+  if (buf.length >= 4 && buf.readUInt32LE(0) === 0x04034b50 && /\.(docx|xlsx|pptx|odt|ods|odp)$/i.test(nome || '.docx')) return metadadosOffice(buf);
   return null;
 }

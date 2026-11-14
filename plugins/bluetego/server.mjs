@@ -2,6 +2,7 @@
 // guarda as respostas por alguns minutos para não repetir consultas e abre links no navegador.
 // As investigações não passam por aqui: a página grava direto em plugin.files.
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { TIPOS, detectar, extrair, normalizar, chave, tipoValido } from './lib/entidades.mjs';
@@ -22,6 +23,15 @@ const MAX_PAGINA = 2_000_000;
 // disjuntor: um site fora do ar faz cada consulta seguinte esperar o tempo inteiro (30 subdomínios × 25 s). Depois de
 // uma falha de conexão, o mesmo site falha na hora por 2 minutos, com o motivo
 const FORA = new Map();
+// só falha de rede (DNS, conexão recusada ou caída, tempo esgotado) liga o disjuntor; cabeçalho inválido, certificado
+// ruim ou redirecionamento em laço são do pedido ou do site, e o site continua no ar para as outras consultas
+const DE_CONEXAO = /^(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EPIPE|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET|UND_ERR_HEADERS_TIMEOUT)$/;
+// corpo que não vai ser lido é cancelado (senão a conexão fica presa até o coletor de lixo passar)
+const descartar = (r) => { try { r.body?.cancel().catch(() => {}); } catch {} };
+// lê o corpo inteiro; o tempo do pedido também vale para o corpo, e estourar vira uma Falha com o motivo
+async function corpo(r, host) {
+  try { return await r.text(); } catch (e) { throw new Falha(e.name === 'TimeoutError' ? `${host} demorou demais para responder.` : `${host} cortou a resposta.`, { status: 504 }); }
+}
 async function pedir(url, opt = {}) {
   let host = url;
   try { host = new URL(url).host; } catch { throw new Falha('endereço inválido: ' + url); }
@@ -32,6 +42,8 @@ async function pedir(url, opt = {}) {
     FORA.delete(host);
     return r;
   } catch (e) {
+    const codigo = (e.cause && e.cause.code) || e.code || '';
+    if (e.name !== 'TimeoutError' && !DE_CONEXAO.test(codigo)) throw new Falha(`${host}: ${(e.cause && e.cause.message) || e.message || e}`, { status: 502 });
     const motivo = e.name === 'TimeoutError' ? `${host} demorou demais para responder.` : `Sem conexão com ${host}.`;
     // é por site: um subdomínio do alvo que não responde só pula a si mesmo
     FORA.set(host, { ate: Date.now() + 120000, motivo });
@@ -41,12 +53,7 @@ async function pedir(url, opt = {}) {
 const ctxRede = {
   async json(url, opt = {}) {
     const r = await pedir(url, { ...opt, headers: { accept: 'application/json', ...(opt.headers || {}) } });
-    const host = new URL(url).host;
-    if (r.status === 404 && opt.nulo404) return null;
-    if (r.status === 429) throw new Falha(`${host} pediu para esperar (limite de consultas). Tente daqui a pouco.`, { status: 429 });
-    if (!r.ok) throw new Falha(`${host} respondeu ${r.status}.`, { status: 502 });
-    const t = await r.text();
-    try { return JSON.parse(t); } catch { throw new Falha(`${host} não devolveu JSON.`, { status: 502 }); }
+    return lerJson(r, new URL(url).host, opt);
   },
   async pagina(url, opt = {}) {
     const r = await pedir(url, { redirect: opt.seguir === false ? 'manual' : 'follow', timeout: opt.timeout, headers: { accept: 'text/html,*/*;q=0.8', ...(opt.navegador ? { 'user-agent': NAVEGADOR, 'accept-language': 'pt-BR,pt;q=0.9,en;q=0.7' } : {}), ...(opt.headers || {}) } });
@@ -57,16 +64,17 @@ const ctxRede = {
       // lê no máximo 2 MB: uma página enorme (ou um download) não trava o servidor
       const leitor = r.body.getReader(), partes = [];
       let total = 0;
-      while (total < MAX_PAGINA) { const { done, value } = await leitor.read(); if (done) break; partes.push(value); total += value.length; }
+      try {
+        while (total < MAX_PAGINA) { const { done, value } = await leitor.read(); if (done) break; partes.push(value); total += value.length; }
+      } catch (e) { leitor.cancel().catch(() => {}); throw new Falha(e.name === 'TimeoutError' ? `${new URL(url).host} demorou demais para responder.` : `${new URL(url).host} cortou a resposta.`, { status: 504 }); }
       leitor.cancel().catch(() => {});
       texto = Buffer.concat(partes.map((x) => Buffer.from(x))).toString('utf8');
     } else r.body?.cancel().catch(() => {});
     return { status: r.status, url: r.url || url, headers, texto };
   },
-  async post(url, corpo, opt = {}) {
-    const r = await pedir(url, { method: 'POST', timeout: opt.timeout || 30000, headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(corpo) });
-    if (!r.ok) throw new Falha(`${new URL(url).host} respondeu ${r.status}.`, { status: 502 });
-    return r.json();
+  async post(url, dados, opt = {}) {
+    const r = await pedir(url, { method: 'POST', timeout: opt.timeout || 30000, headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(dados) });
+    return lerJson(r, new URL(url).host, opt);
   },
   // arquivo inteiro (documentos para ler os metadados), até "max" bytes: maior que isso, desiste sem baixar o resto
   async binario(url, opt = {}) {
@@ -77,7 +85,9 @@ const ctxRede = {
     if (tam > max) { r.body.cancel().catch(() => {}); return { status: r.status, tipo: r.headers.get('content-type') || '', dados: null, grande: true }; }
     const leitor = r.body.getReader(), partes = [];
     let total = 0;
-    while (true) { const { done, value } = await leitor.read(); if (done) break; total += value.length; if (total > max) { leitor.cancel().catch(() => {}); return { status: r.status, dados: null, grande: true }; } partes.push(value); }
+    try {
+      while (true) { const { done, value } = await leitor.read(); if (done) break; total += value.length; if (total > max) { leitor.cancel().catch(() => {}); return { status: r.status, dados: null, grande: true }; } partes.push(value); }
+    } catch { leitor.cancel().catch(() => {}); return { status: r.status, dados: null }; }
     return { status: r.status, url: r.url || url, tipo: r.headers.get('content-type') || '', dados: Buffer.concat(partes.map((x) => Buffer.from(x))) };
   },
   // pelo plugin.fetch da IDE: o {{vault:...}} é trocado lá dentro, e a chave nunca passa por este processo
@@ -103,15 +113,25 @@ const ctxRede = {
       } catch (e) { if (e instanceof Falha) throw e; tokenGithub = { em: Date.now(), tem: false }; }
     }
     const r = await pedir(url, { headers: cab, timeout: opt.timeout });
-    if (r.status === 404) return null;
+    if (r.status === 404) { descartar(r); return null; }
+    if (!r.ok) descartar(r);
     if ((r.status === 403 || r.status === 429) && r.headers.get('x-ratelimit-remaining') === '0') {
       const volta = Number(r.headers.get('x-ratelimit-reset')) * 1000;
       throw new Falha(`Acabou a cota da API do GitHub sem token (60 consultas por hora)${volta ? `, volta às ${new Date(volta).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}. Guarde um token do GitHub no Cofre (bluetego.github) para ter 5.000 por hora.`, { status: 429, codigo: 'cofre', cofre: 'bluetego.github' });
     }
     if (!r.ok) throw new Falha(`api.github.com respondeu ${r.status}.`, { status: 502 });
-    return r.json();
+    const t = await corpo(r, 'api.github.com');
+    try { return JSON.parse(t); } catch { throw new Falha('api.github.com não devolveu JSON.', { status: 502 }); }
   },
 };
+// resposta JSON: 404 (com nulo404), 429 e erro viram Falha com o motivo; o corpo que não serve é descartado
+async function lerJson(r, host, opt = {}) {
+  if (r.status === 404 && opt.nulo404) { descartar(r); return null; }
+  if (r.status === 429) { descartar(r); throw new Falha(`${host} pediu para esperar (limite de consultas). Tente daqui a pouco.`, { status: 429 }); }
+  if (!r.ok) { descartar(r); throw new Falha(`${host} respondeu ${r.status}.`, { status: 502 }); }
+  const t = await corpo(r, host);
+  try { return JSON.parse(t); } catch { throw new Falha(`${host} não devolveu JSON.`, { status: 502 }); }
+}
 // se há token do GitHub liberado no Cofre: conferido a cada 5 minutos (o usuário pode guardar um a qualquer hora)
 let tokenGithub = { em: 0, tem: false };
 async function temTokenGithub() {
@@ -154,10 +174,14 @@ rota('transformar', async (b) => {
   const cfg = await p.settings().catch(() => ({}));
   // as entidades ligadas (só as que a transformação usa, como os domínios para os e-mails prováveis)
   const vizinhos = Array.isArray(b.vizinhos) ? b.vizinhos.slice(0, 40).map((v) => ({ tipo: String(v.tipo || ''), valor: String(v.valor || '') })) : [];
-  const k = [b.t, b.tipo, b.valor, lim, b.t === 'emails-provaveis' ? JSON.stringify(vizinhos) : ''].join('|');
+  const sitesAmplo = Number(cfg.sitesAmplo) || 500;
+  // a chave leva tudo o que muda o resultado: os vizinhos (e-mails prováveis), o texto inteiro (o valor de um texto
+  // longo é só o começo dele) e quantos sites a busca ampla confere
+  const extra = b.t === 'emails-provaveis' ? JSON.stringify(vizinhos) : b.tipo === 'texto' && b.completo ? crypto.createHash('sha1').update(String(b.completo)).digest('hex') : b.t === 'contas-amplo' ? String(sitesAmplo) : '';
+  const k = [b.t, b.tipo, b.valor, lim, extra].join('|');
   const guardada = CACHE.get(k);
   if (guardada && Date.now() - guardada.em < VALIDADE && !b.deNovo) return { ...guardada.v, guardada: true };
-  const r = await rodar(String(b.t || ''), String(b.tipo || ''), String(b.valor || ''), { ...ctxRede, limite: lim, vizinhos, sitesAmplo: Number(cfg.sitesAmplo) || 500 }, b.completo);
+  const r = await rodar(String(b.t || ''), String(b.tipo || ''), String(b.valor || ''), { ...ctxRede, limite: lim, vizinhos, sitesAmplo }, b.completo);
   lembrar(k, r);
   return r;
 });
@@ -166,6 +190,8 @@ rota('extrair', (b) => ({ entidades: extrair(String(b.texto || '')).filter((e) =
 rota('entidade', (b) => {
   const bruto = String(b.valor || '').trim();
   if (!bruto) throw new Falha('Escreva um valor.');
+  // só pontuação ("???", "---") não é nada que dê para investigar
+  if (!/[\p{L}\p{N}]/u.test(bruto)) throw new Falha('Esse valor não tem letras nem números: escreva um domínio, e-mail, nome, telefone, IP…');
   const tipo = tipoValido(b.tipo) ? b.tipo : detectar(bruto);
   const valor = normalizar(tipo, bruto);
   return { tipo, valor, id: chave(tipo, valor), adivinhado: detectar(bruto) };
@@ -174,7 +200,7 @@ rota('entidade', (b) => {
 rota('pensar', (b) => ({ pistas: pensar(b.grafo || {}, TRANSFORMACOES, b.aprendizado || {}) }));
 // IA: o pedido sai daqui (a página manda para o provedor escolhido) e a resposta volta para ser conferida
 rota('ia-pedido', (b) => montarPedido({ ...b, transformacoes: TRANSFORMACOES.filter((t) => !t.cofre) }));
-rota('ia-ler', (b) => lerResposta(b.texto, b.mapa || {}, b.grafo || {}, TRANSFORMACOES));
+rota('ia-ler', (b) => lerResposta(b.texto, b.mapa || {}, b.grafo || {}, TRANSFORMACOES, { modo: b.modo }));
 rota('abrir', (b) => {
   const u = String(b.url || '');
   if (!/^https?:\/\/[^\s"]+$/i.test(u)) throw new Falha('só abro endereços http e https');

@@ -58,11 +58,27 @@ const F = { fila: [], ativos: 0, total: 0, feitos: 0, erros: [], pulados: {}, ca
 // aprendizado: quanto cada transformação rendeu em cada tipo, neste PC ("dominio|dns-ip": { n: vezes, a: resultados }).
 // As pistas sugerem primeiro o que costuma render, e os botões mostram a média.
 const AP = { dados: {}, salvarT: 0 };
+// teto de 50 vezes por chave mantendo a média (o uso recente pesa mais e o número não cresce sem fim); só números finitos
+const APRENDER_TETO = 50;
 function aprender(tipo_, tId, resultados) {
-  const k = tipo_ + '|' + tId, x = AP.dados[k] || { n: 0, a: 0 };
-  AP.dados[k] = { n: x.n + 1, a: x.a + resultados };
+  const k = tipo_ + '|' + tId, x = AP.dados[k] || {};
+  let n = Number.isFinite(x.n) && x.n > 0 ? x.n : 0, a = Number.isFinite(x.a) && x.a >= 0 ? x.a : 0;
+  const r = Number.isFinite(resultados) && resultados >= 0 ? resultados : 0;
+  if (n >= APRENDER_TETO) { a = (a / n) * (APRENDER_TETO - 1); n = APRENDER_TETO - 1; }
+  AP.dados[k] = { n: n + 1, a: Math.round((a + r) * 10) / 10 };
   clearTimeout(AP.salvarT);
   AP.salvarT = setTimeout(() => plugin.data.set('aprendizado', AP.dados).catch(() => {}), 1500);
+}
+// o mesmo que limparAprendizado de lib/pistas.mjs (a tela não importa lib/): chaves tortas saem, n até o teto com a média mantida
+function limparAprendizado(ap) {
+  const out = {};
+  if (!ap || typeof ap !== 'object') return out;
+  for (const [k, x] of Object.entries(ap)) {
+    if (!/^[a-z]+\|[a-z0-9-]+$/.test(k) || !x || !Number.isFinite(x.n) || x.n <= 0 || !Number.isFinite(x.a) || x.a < 0) continue;
+    const n = Math.min(Math.round(x.n), APRENDER_TETO) || 1;
+    out[k] = { n, a: Math.round((x.a / x.n) * n * 10) / 10 };
+  }
+  return out;
 }
 const rendeu = (tipo_, tId) => { const x = AP.dados[tipo_ + '|' + tId]; return x && x.n ? x.a / x.n : null; };
 const R = {}; // elementos da tela
@@ -88,19 +104,29 @@ const curto = (s, n = 34) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const rotuloDe = (n) => n.rotulo || n.valor;
 
 // ---------- investigação: dados ----------
+// o nome padrão leva a hora: várias investigações no mesmo dia não ficam com o mesmo nome
 function novaInv(nome) {
-  return { versao: 1, id: id8(), nome: nome || 'Investigação ' + new Date().toLocaleDateString('pt-BR'), criada: agora(), alterada: agora(), nos: [], ligacoes: [], historico: [] };
+  return { versao: 1, id: id8(), nome: nome || 'Investigação ' + new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }), criada: agora(), alterada: agora(), nos: [], ligacoes: [], historico: [] };
 }
 function carregarInv(inv) {
   G.inv = inv; G.nos = new Map(); G.lig = new Map(); G.desfazer = []; G.refazer = [];
-  for (const n of inv.nos || []) G.nos.set(n.id, { props: {}, feitas: [], ...n });
+  for (const n of inv.nos || []) G.nos.set(n.id, semPosicao({ props: {}, feitas: [], ...n }));
   for (const l of inv.ligacoes || []) if (G.nos.has(l.de) && G.nos.has(l.para)) G.lig.set(l.id, l);
   Object.assign(V, { caminho: null, hover: null, hoverLig: null, foco: null, ate: null, tempoAberto: false, ligando: null, pistas: [], ia: null, layout: inv.layout || 'forcas', grupos: null });
   V.sel.clear(); sujar();
   plugin.data.set('ultima', inv.id).catch(() => {});
   pintarTudo();
-  if (G.nos.size) { if (V.layout === 'tipos') aplicarLayout('tipos', { instantaneo: true }); setTimeout(() => ajustar(true), 60); }
+  // investigação vazia: a câmera volta ao normal (senão herda o zoom de longe da anterior e tudo nasce minúsculo e encavalado)
+  if (G.nos.size) { if (V.layout === 'tipos') aplicarLayout('tipos', { instantaneo: true }); setTimeout(() => ajustar(true), 60); } else { V.cam = { x: 0, y: 0, z: 1 }; V.camAnim = null; }
+  if (V.semPos) { V.semPos = false; aquecer(1); setTimeout(() => ajustar(), 1500); }
+  // forças: um empurrão leve ao abrir desfaz entidades encavaladas (salvas no meio de uma animação, importadas); um grafo já assentado quase não mexe
+  else if (G.nos.size && V.layout === 'forcas') setTimeout(() => aquecer(0.3), 300);
   agendarPistas();
+}
+// arquivo feito à mão ou por outra ferramenta, sem x/y: sem isso a física vira NaN e some com o grafo inteiro
+function semPosicao(n, c = { x: 0, y: 0 }) {
+  if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { const a = Math.random() * Math.PI * 2, d = 40 + Math.random() * 260; n.x = c.x + Math.cos(a) * d; n.y = c.y + Math.sin(a) * d; n.vx = n.vy = 0; V.semPos = true; }
+  return n;
 }
 function retrato() { return JSON.stringify({ nos: [...G.nos.values()], lig: [...G.lig.values()] }); }
 function lembrar() {
@@ -127,7 +153,7 @@ function historico(texto) {
 function mudou(semFisica) {
   sujar();
   if (!semFisica) aquecer(0.5);
-  pintarDetalhes(); pintarLado(); pintarVazio(); pintarFoco(); desenhar();
+  pintarDetalhes(); pintarLado(); pintarVazio(); pintarFoco(); if (V.busca) contarBusca(); desenhar();
   if (V.tempoAberto) pintarTempo();
   agendarSalvar(); agendarPistas();
 }
@@ -263,6 +289,7 @@ function folhasDe(ids) {
 // ---------- transformações e máquinas ----------
 function enfileirar(tId, nos, opt = {}) {
   const t = transf(tId);
+  if (!t) return Promise.resolve([]);
   const alvos = nos.filter((n) => t.de.includes(n.tipo));
   if (!alvos.length) return Promise.resolve([]);
   if (!F.ativos && !F.fila.length) { F.total = 0; F.feitos = 0; F.erros = []; F.cancelar = false; lembrar(); }
@@ -316,6 +343,8 @@ function terminouFila() {
   for (const [site, x] of Object.entries(F.pulados)) historico(`${x.n} ${x.n === 1 ? 'consulta pulada' : 'consultas puladas'}: ${site} está fora do ar (o Bluetego tenta de novo às ${x.volta})`);
   const pulos = Object.values(F.pulados).reduce((a, x) => a + x.n, 0);
   F.pulados = {};
+  // grafo pequeno com resultado fora da tela: a câmera mostra tudo (num grafo grande ela fica onde o usuário deixou)
+  if (!F.maquina && G.nos.size <= 60 && R.canvas && [...vista()].some((id) => { const n = G.nos.get(id), p = paraTela(n.x, n.y); return p.x < 20 || p.y < 20 || p.x > R.canvas.clientWidth - 20 || p.y > R.canvas.clientHeight - 20; })) setTimeout(() => ajustar(), 900);
   if (F.erros.length || pulos) toast([F.erros.length === 1 ? F.erros[0] : F.erros.length ? `${F.erros.length} transformações falharam.` : '', pulos ? `${pulos} consultas puladas (site fora do ar).` : '', 'Veja no histórico.'].filter(Boolean).join(' '), 'err');
   pintarFila(); mudou();
 }
@@ -337,8 +366,10 @@ async function rodarMaquina(m, semente) {
   try {
     for (const [i, p] of m.passos.entries()) {
       if (F.cancelar) break;
-      F.maquina.passo = i + 1; F.maquina.atual = transf(p.t).nome; pintarFila();
       const t = transf(p.t);
+      // passo que aponta para uma transformação que não existe (catálogo mudou): pula sem derrubar a máquina
+      if (!t) { historico(`Máquina "${m.nome}": passo ${i + 1} pulado (transformação ${p.t} não existe mais)`); continue; }
+      F.maquina.passo = i + 1; F.maquina.atual = t.nome; pintarFila();
       // "tipos" limita o passo: a busca na web do rastro do apelido não sai procurando cada primeiro nome achado
       let alvos = [...daMaquina].map((id) => G.nos.get(id)).filter((n) => n && t.de.includes(n.tipo) && (!p.tipos || p.tipos.includes(n.tipo)) && !feitas.has(p.t + '|' + n.id));
       // escopo: domínio de outra empresa que apareceu no caminho (vizinho de hospedagem, CDN) não é sondado
@@ -699,7 +730,8 @@ function pontoControle(a, b, l) {
 function colocador() {
   const grade = new Map(), CEL = 90;
   const celulas = (x, y, w, h, fn) => { for (let i = Math.floor(x / CEL); i <= Math.floor((x + w) / CEL); i++) for (let j = Math.floor(y / CEL); j <= Math.floor((y + h) / CEL); j++) fn(i + ',' + j); };
-  const livre = (x, y, w, h, dono) => { let ok = true; celulas(x, y, w, h, (k) => { for (const r of grade.get(k) || []) if (r.dono !== dono && x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) ok = false; }); return ok; };
+  // soRotulos: só os rótulos contam (um rótulo importante pode passar por cima de uma bolinha, nunca de outro rótulo)
+  const livre = (x, y, w, h, dono, soRotulos) => { let ok = true; celulas(x, y, w, h, (k) => { for (const r of grade.get(k) || []) if (r.dono !== dono && (!soRotulos || /^[rlg]:/.test(r.dono)) && x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) ok = false; }); return ok; };
   const ocupar = (x, y, w, h, dono) => { const r = { x, y, w, h, dono }; celulas(x, y, w, h, (k) => (grade.get(k) || grade.set(k, []).get(k)).push(r)); };
   return { livre, ocupar };
 }
@@ -811,9 +843,11 @@ function desenhar() {
       ctx.fillText('+' + (esc_ > 99 ? '99' : esc_), bx, by + 0.5 / z);
       V.badges.push({ id: n.id, x: bx, y: by, r: br });
     }
-    const prio = sel || n.id === V.hover ? 1e9 : (n.alerta ? 500 : 0) + n._g * 10 + (foco && foco.has(n.id) ? 1e6 : 0);
+    // o que a busca achou ganha o nome na tela (senão só sobra uma bolinha acesa no meio das apagadas)
+    const prio = sel || n.id === V.hover ? 1e9 : (n.alerta ? 500 : 0) + n._g * 10 + ((foco && foco.has(n.id)) || (V.busca && !foco && casa(n)) ? 1e6 : 0);
     const muitas = vis.size > 25, folha = n._g <= 1;
-    const mostra = prio >= 1e6 || n.alerta || (z > 0.3 && !(muitas && folha && z < 1.15) && !(vis.size > 80 && n._g < 3 && z < 0.9));
+    // as entidades centrais (muitas ligações) mantêm o nome mesmo de longe: são elas que dão o mapa do grafo
+    const mostra = prio >= 1e6 || n.alerta || (n._g >= 8 && z > 0.1) || (z > 0.3 && !(muitas && folha && z < 1.15) && !(vis.size > 80 && n._g < 3 && z < 0.9));
     if (mostra) rotulos.push({ n, r, prio, alfa, sel });
   }
   ctx.globalAlpha = 1;
@@ -824,6 +858,18 @@ function desenhar() {
   for (const id of vis) { const n = G.nos.get(id), p = paraTela(n.x, n.y), rz = raio(n) * z + 2; espaco.ocupar(p.x - rz, p.y - rz, rz * 2, rz * 2, id); }
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   rotulos.sort((a, b) => b.prio - a.prio);
+  // nomes dos grupos (layout por tipo) primeiro: grupos vizinhos não escrevem um por cima do outro
+  if (V.grupos && V.layout === 'tipos') {
+    ctx.font = `600 12px ${C.fonte}`;
+    for (const g of V.grupos) {
+      const t = `${tipo(g.tipo).nome} · ${g.n}`, tw = ctx.measureText(t).width + 8, p = paraTela(g.x, g.y - g.r);
+      let y = p.y - 18;
+      for (let i = 0; i < 4 && !espaco.livre(p.x - tw / 2, y, tw, 16, null, true); i++) y -= 16;
+      espaco.ocupar(p.x - tw / 2, y, tw, 16, 'g:' + g.tipo);
+      ctx.globalAlpha = 0.9; ctx.fillStyle = tipo(g.tipo).cor; ctx.fillText(t, p.x, y + 8.5);
+    }
+    ctx.globalAlpha = 1;
+  }
   let postos = 0;
   for (const { n, r, alfa, sel, prio } of rotulos) {
     if (postos > 300 && prio < 1e6) break;
@@ -833,7 +879,8 @@ function desenhar() {
     const tw = ctx.measureText(t).width + 12, th = destaque ? 19 : 17;
     const p = paraTela(n.x, n.y), rz = r * z;
     const lados = [[p.x - tw / 2, p.y + rz + 3], [p.x - tw / 2, p.y - rz - 3 - th], [p.x + rz + 4, p.y - th / 2], [p.x - rz - 4 - tw, p.y - th / 2]];
-    const pos = lados.find(([x, y]) => espaco.livre(x, y, tw, th, n.id)) || (prio >= 1e9 ? lados[0] : null);
+    // sem lado livre, uma entidade central ainda põe o nome por cima das bolinhas vizinhas (sem cobrir outro rótulo)
+    const pos = lados.find(([x, y]) => espaco.livre(x, y, tw, th, n.id)) || (n._g >= 6 || n.alerta ? lados.find(([x, y]) => espaco.livre(x, y, tw, th, n.id, true)) : null) || (prio >= 1e9 ? lados[0] : null);
     if (!pos) continue;
     const [x, y] = pos;
     if (x > w || y > h || x + tw < 0 || y + th < 0) continue;
@@ -849,17 +896,13 @@ function desenhar() {
   ctx.font = `500 10.5px ${C.fonte}`;
   for (const { l, x: lx, y: ly, forte } of rotulosLig) {
     const t = curto(l.rotulo, 32), tw = ctx.measureText(t).width + 10, th = 16, p = paraTela(lx, ly);
-    if (!espaco.livre(p.x - tw / 2, p.y - th / 2, tw, th) && !forte) continue;
+    // a ligação em destaque pode passar por cima de uma bolinha, mas não de outro rótulo (senão vira um bolo ilegível)
+    if (!espaco.livre(p.x - tw / 2, p.y - th / 2, tw, th, null, forte)) continue;
     espaco.ocupar(p.x - tw / 2, p.y - th / 2, tw, th, 'l:' + l.id);
     ctx.globalAlpha = forte ? 1 : 0.85;
     pilula(ctx, p.x - tw / 2, p.y - th / 2, tw, th, C.panel);
     ctx.fillStyle = forte ? C.fg : C.muted;
     ctx.fillText(t, p.x, p.y + 0.5);
-  }
-  // nomes dos grupos (layout por tipo)
-  if (V.grupos && V.layout === 'tipos') {
-    ctx.font = `600 12px ${C.fonte}`;
-    for (const g of V.grupos) { const p = paraTela(g.x, g.y - g.r); ctx.globalAlpha = 0.9; ctx.fillStyle = tipo(g.tipo).cor; ctx.fillText(`${tipo(g.tipo).nome} · ${g.n}`, p.x, p.y - 10); }
   }
   ctx.globalAlpha = 1;
   if (V.caixa) {
@@ -877,7 +920,8 @@ function desenharMini() {
   const cv = R.mini;
   if (!cv) return;
   const vis = vista();
-  cv.parentElement.hidden = !V.mini || vis.size < 30;
+  // palco pequeno (janela estreita, painel embaixo): o minimapa cobriria metade do grafo
+  cv.parentElement.hidden = !V.mini || vis.size < 30 || R.palco.clientWidth < 560 || R.palco.clientHeight < 340;
   if (cv.parentElement.hidden) return;
   const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
@@ -954,7 +998,10 @@ function ajustarEm(pontos, instantaneo) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of pontos) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
   const w = R.canvas.clientWidth || 800, h = R.canvas.clientHeight || 600;
-  moverCamera({ x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: Math.max(0.12, Math.min(1.5, Math.min((w - 140) / (x1 - x0 + 1), (h - 140) / (y1 - y0 + 1)))) }, instantaneo ? 0 : 450);
+  // margens para o que flutua sobre o grafo: faixas no topo, legenda embaixo, zoom e minimapa à direita (e os rótulos)
+  const mE = 70, mD = 100, mC = 70, mB = 80;
+  const z = Math.max(0.12, Math.min(1.5, Math.min((w - mE - mD) / (x1 - x0 + 1), (h - mC - mB) / (y1 - y0 + 1))));
+  moverCamera({ x: (x0 + x1) / 2 - (mE - mD) / 2 / z, y: (y0 + y1) / 2 - (mC - mB) / 2 / z, z }, instantaneo ? 0 : 450);
 }
 function ajustar(instantaneo) {
   const nos = [...vista()].map((id) => G.nos.get(id));
@@ -1085,7 +1132,11 @@ function ligarCanvas(cv) {
     const l = ligacaoEm(p.x, p.y);
     if (l) menuLigacao(e, l); else menuFundo(e, paraMundo(p.x, p.y));
   });
-  cv.addEventListener('keydown', (e) => {
+  // os atalhos valem na tela toda (não só com o grafo focado): depois de clicar num botão da barra ou do painel o
+  // Ctrl+Z, o Del e as setas continuam funcionando; campos de texto e diálogos ficam com as teclas deles
+  (R.pg || cv).addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || !R.dlg.hidden || e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (e.target !== cv && e.target.closest('button, a, [tabindex]') && (e.key === 'Enter' || e.key === ' ')) return;
     const k = (e.ctrlKey || e.metaKey ? 'Ctrl+' : '') + (e.shiftKey && e.key.length > 1 ? 'Shift+' : '') + e.key;
     const sel = selecionadas(), um = sel.length === 1 ? sel[0] : null;
     const acoes = {
@@ -1094,7 +1145,7 @@ function ligarCanvas(cv) {
       'Ctrl+z': desfazer, 'Ctrl+y': refazer, 'Ctrl+Z': refazer,
       'Ctrl+c': () => sel.length && bs.copyText(sel.map((n) => n.valor).join('\n')),
       f: () => ajustar(), F: () => ajustar(),
-      Escape: () => { if (V.ligando) return pararLigacao(); if (V.foco) return focar(null); V.busca = ''; if (R.busca) R.busca.value = ''; selecionar([]); },
+      Escape: () => { if (V.ligando) return pararLigacao(); if (V.foco) return focar(null); V.busca = ''; if (R.busca) R.busca.value = ''; contarBusca(); selecionar([]); },
       Enter: () => sel.length && rapidas(sel), '+': () => zoom(1.25), '=': () => zoom(1.25), '-': () => zoom(0.8),
       1: () => aplicarLayout('forcas'), 2: () => aplicarLayout('hierarquico'), 3: () => aplicarLayout('radial'), 4: () => aplicarLayout('tipos'), 5: () => aplicarLayout('circulo'),
       '.': () => um && focar(um, (V.foco && V.foco.id === um.id ? V.foco.saltos : 1) + (V.foco && V.foco.id === um.id ? 1 : 1)),
@@ -1103,6 +1154,7 @@ function ligarCanvas(cv) {
       t: () => alternarTempo(), p: () => alternarPainel(), '?': () => dlgAtalhos(),
       l: () => (um ? comecarLigacao(um) : sel.length === 2 ? ligarDuas(sel) : toast('Escolha a entidade de onde sai a ligação')),
       n: () => dlgAdicionar(null, um ? um.id : null),
+      'Ctrl+f': () => { R.busca.focus(); R.busca.select(); }, '/': () => { R.busca.focus(); R.busca.select(); },
       ArrowLeft: () => andar(-1, 0), ArrowRight: () => andar(1, 0), ArrowUp: () => andar(0, -1), ArrowDown: () => andar(0, 1),
     };
     const fn = acoes[k];
@@ -1286,6 +1338,7 @@ function dlgColar(textoInicial, origem) {
       const ligarA = el.querySelector('[data-ligar]')?.checked ? sel[0].id : null;
       const n = adicionarVarias(lista, ligarA, origem ? 'citado em ' + origem : 'citado no texto');
       historico(`Texto colado: ${lista.length} entidades reconhecidas, ${n} novas`);
+      selecionar(lista.map((e) => e.id).filter((id) => G.nos.has(id)));
       toast(`${n} ${n === 1 ? 'entidade nova' : 'entidades novas'}`, 'ok');
       fechar(true); setTimeout(ajustar, 900);
     };
@@ -1400,7 +1453,7 @@ function importarTexto(texto, nome) {
   if (j && Array.isArray(j.nos) && Array.isArray(j.ligacoes)) {
     lembrar();
     let n = 0;
-    for (const x of j.nos) if (!G.nos.has(x.id)) { G.nos.set(x.id, { props: {}, feitas: [], ...x, _nasceu: performance.now() }); n++; }
+    for (const x of j.nos) if (x && x.id && x.tipo && x.valor != null && !G.nos.has(x.id)) { G.nos.set(x.id, semPosicao({ props: {}, feitas: [], ...x, _nasceu: performance.now() }, centroVisivel())); n++; }
     for (const l of j.ligacoes) if (G.nos.has(l.de) && G.nos.has(l.para) && !G.lig.has(l.id)) G.lig.set(l.id, l);
     V.popAte = performance.now() + 450; sujar();
     historico(`Importado de ${nome}: ${n} entidades novas`);
@@ -1414,7 +1467,7 @@ function montar(el) {
   el.innerHTML = `
     <div class="btg-barra">
       <input class="btg-nome" data-nome spellcheck="false" title="Nome da investigação">
-      <label class="btg-investigar" title="Escreva um domínio, IP, e-mail, @apelido, CNPJ, CVE... e Enter: entra no grafo e as transformações rápidas já rodam. Vários de uma vez também (separe por espaço ou vírgula).">${IC.raio}<input data-rapido placeholder="Investigar: domínio, IP, e-mail, @apelido, CNPJ…" spellcheck="false"><kbd>Enter</kbd></label>
+      <label class="btg-investigar" title="Escreva um domínio, IP, e-mail, @apelido, CNPJ, CVE... e Enter: entra no grafo e as transformações rápidas já rodam. Vários de uma vez também (separe por espaço ou vírgula).">${IC.raio}<input data-rapido placeholder="Investigar: domínio, IP, e-mail…" spellcheck="false" aria-label="Investigar um valor (Enter)"><kbd>Enter</kbd></label>
       <button class="icon-btn" data-a="adicionar" title="Adicionar escolhendo o tipo (N: nova ligada à escolhida)">${IC.mais}</button>
       <button class="chip" data-a="colar" title="Colar um texto e extrair as entidades (ou Ctrl+V direto no grafo)">${IC.colar}<span>Colar</span></button>
       <button class="chip" data-a="maquinas" title="Roteiros de transformações">${IC.engrenagem}<span>Máquinas</span></button>
@@ -1424,7 +1477,7 @@ function montar(el) {
       <button class="icon-btn" data-a="tempo" title="Linha do tempo (T)">${IC.tempo}</button>
       <button class="icon-btn" data-a="exportar" title="Exportar e importar">${IC.exportar}</button>
       <button class="icon-btn" data-a="atalhos" title="Atalhos do teclado (?)">${IC.teclado}</button>
-      <label class="btg-busca">${IC.busca}<input data-busca placeholder="Procurar no grafo" spellcheck="false"></label>
+      <label class="btg-busca" title="Procurar no grafo (Ctrl+F ou /): valor, rótulo, tipo, propriedade ou anotação. Enter escolhe as achadas">${IC.busca}<input data-busca placeholder="Procurar no grafo" spellcheck="false" aria-label="Procurar no grafo"><span class="btg-busca-n" data-busca-n hidden></span></label>
       <button class="icon-btn" data-a="painel" title="Mostrar ou esconder o painel (P)">${IC.painel}</button>
     </div>
     <div class="btg-corpo">
@@ -1451,7 +1504,7 @@ function montar(el) {
   const q = (s) => el.querySelector(s);
   Object.assign(R, {
     pg: el, canvas: q('[data-cv]'), palco: q('[data-palco]'), vazio: q('[data-vazio]'), fila: q('[data-fila]'), dica: q('[data-dica]'), det: q('[data-det]'), detc: q('[data-detc]'),
-    dlg: q('[data-dlg]'), nome: q('[data-nome]'), busca: q('[data-busca]'), legenda: q('[data-legenda]'), acoes: q('[data-acoes]'), mini: q('[data-mini]'), foco: q('[data-foco]'),
+    dlg: q('[data-dlg]'), nome: q('[data-nome]'), busca: q('[data-busca]'), buscaN: q('[data-busca-n]'), legenda: q('[data-legenda]'), acoes: q('[data-acoes]'), mini: q('[data-mini]'), foco: q('[data-foco]'),
     tempo: q('[data-tempo]'), ligando: q('[data-ligando]'), soltar: q('[data-soltar]'), rapido: q('[data-rapido]'), npistas: q('[data-npistas]'), layoutNome: q('[data-layout-nome]'),
   });
   ligarCanvas(R.canvas);
@@ -1483,10 +1536,12 @@ function montar(el) {
   R.nome.onchange = () => { const v = R.nome.value.trim(); if (v && G.inv) { G.inv.nome = v; agendarSalvar(); } else if (G.inv) R.nome.value = G.inv.nome; };
   R.nome.onkeydown = (e) => { if (e.key === 'Enter') R.nome.blur(); };
   R.rapido.onkeydown = (e) => { if (e.key === 'Enter') { const v = R.rapido.value; R.rapido.value = ''; investigarRapido(v); } if (e.key === 'Escape') { R.rapido.value = ''; R.canvas.focus(); } };
-  R.busca.oninput = () => { V.busca = R.busca.value.trim(); desenhar(); };
+  // a legenda rola de lado com a roda do mouse (sem barra de rolagem visível, senão os tipos do fim ficam escondidos)
+  R.legenda.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && R.legenda.scrollWidth > R.legenda.clientWidth) { R.legenda.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+  R.busca.oninput = () => { V.busca = R.busca.value.trim(); contarBusca(); desenhar(); };
   R.busca.onkeydown = (e) => {
-    if (e.key === 'Enter') { const ach = [...vista()].map((id) => G.nos.get(id)).filter(casa); if (ach.length) { selecionar(ach.map((n) => n.id)); if (ach.length === 1) centrar(ach[0]); else ajustarEm(ach); } }
-    if (e.key === 'Escape') { R.busca.value = ''; V.busca = ''; desenhar(); R.canvas.focus(); }
+    if (e.key === 'Enter') { V.busca = R.busca.value.trim(); contarBusca(); if (!V.busca) return; const ach = [...vista()].map((id) => G.nos.get(id)).filter(casa); if (ach.length) { selecionar(ach.map((n) => n.id)); if (ach.length === 1) centrar(ach[0]); else ajustarEm(ach); } }
+    if (e.key === 'Escape') { R.busca.value = ''; V.busca = ''; contarBusca(); desenhar(); R.canvas.focus(); }
   };
   // colar no grafo: um valor entra e já é investigado; um texto maior abre a extração
   el.addEventListener('paste', (e) => {
@@ -1515,6 +1570,17 @@ function montar(el) {
   plugin.onUnload(() => { ro.disconnect(); mo.disconnect(); clearInterval(V.tocando); });
   iniciar();
 }
+// quantas o filtro acha (as que ele apaga ficam visíveis, mas fracas): sem isso "nada achado" e "achou" parecem iguais
+function contarBusca() {
+  const el = R.buscaN;
+  if (!el) return;
+  el.hidden = !V.busca;
+  if (!V.busca) return;
+  const n = [...vista()].filter((id) => casa(G.nos.get(id))).length;
+  el.textContent = n ? String(n) : 'nada';
+  el.classList.toggle('zero', !n);
+  el.title = n ? `${n} ${n === 1 ? 'entidade achada' : 'entidades achadas'}: Enter escolhe ${n === 1 ? 'ela' : 'todas'}` : 'Nenhuma entidade visível casa com a busca';
+}
 // o campo Investigar: um valor entra e roda as rápidas; vários viram entidades de uma vez
 async function investigarRapido(texto, origem) {
   const t = String(texto || '').trim();
@@ -1526,7 +1592,10 @@ async function investigarRapido(texto, origem) {
     if (lista.length > 12 || origem) return dlgColar(t, origem);
     adicionarVarias(lista);
     historico(`Investigar: ${lista.length} entidades`);
-    rapidas(lista.map((e) => G.nos.get(e.id)).filter(Boolean));
+    const novas = lista.map((e) => G.nos.get(e.id)).filter(Boolean);
+    // as que acabaram de entrar ficam escolhidas (senão a seleção antiga continua apagando o resto do grafo)
+    selecionar(novas.map((n) => n.id));
+    rapidas(novas);
     setTimeout(() => ajustar(), 700);
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -1668,7 +1737,7 @@ function dlgAtalhos() {
     ['L ou Alt + arrastar', 'ligar a entidade escolhida a outra'], ['N', 'nova entidade ligada à escolhida'], ['.', 'só a vizinhança da escolhida (de novo: mais um salto)'],
     ['C', 'recolher ou abrir os resultados soltos'], ['1 a 5', 'forças, hierárquico, radial, por tipo, círculo'], ['Setas', 'andar para a entidade vizinha'],
     ['F', 'ajustar à tela'], ['M · T · P', 'minimapa · linha do tempo · painel'], ['Shift + arrastar', 'selecionar várias'], ['Ctrl + clique', 'somar à seleção'],
-    ['Ctrl+Z · Ctrl+Y', 'desfazer · refazer'], ['Del · Ctrl+C · Ctrl+A', 'remover · copiar os valores · selecionar tudo'], ['Esc', 'cancelar a ligação, sair do foco, limpar a seleção'],
+    ['Ctrl+F ou /', 'procurar no grafo (Enter escolhe as achadas)'], ['Ctrl+Z · Ctrl+Y', 'desfazer · refazer'], ['Del · Ctrl+C · Ctrl+A', 'remover · copiar os valores · selecionar tudo'], ['Esc', 'cancelar a ligação, sair do foco, limpar a seleção'],
   ];
   return dialogo(`<h3>Atalhos</h3><table class="btg-props btg-atalhos">${linhas.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table><div class="btg-dlg-b"><button class="chip primary" data-cancelar>Fechar</button></div>`, () => {});
 }
@@ -1685,11 +1754,14 @@ async function calcularPistas() {
   if (!G.inv || !CAT) return;
   try { V.pistas = (await chamar('pensar', { grafo: grafoParaServidor(), aprendizado: AP.dados })).pistas; } catch { return; }
   const descartadas = new Set(G.inv.descartadas || []);
-  V.pistas = V.pistas.filter((p) => !descartadas.has(p.tipo + '|' + p.titulo));
+  // (o formato antigo, tipo|título exato, ainda vale para o que já foi descartado)
+  V.pistas = V.pistas.filter((p) => !descartadas.has(chavePista(p)) && !descartadas.has(p.tipo + '|' + p.titulo));
   const novas = V.pistas.filter((p) => p.tipo !== 'proximo').length;
   if (R.npistas) { R.npistas.hidden = !novas; R.npistas.textContent = novas; }
   if (V.aba === 'analise') pintarDetalhes();
 }
+// chave estável de uma pista: o título muda com as contagens ("3 pontos de atenção" vira "4 pontos…"), então os números saem
+const chavePista = (p) => p.tipo + '|' + (p.id != null ? 'id:' + p.id : String(p.titulo || '').replace(/\d+([.,]\d+)?/g, '#').replace(/\s+/g, ' ').trim().toLowerCase());
 const ROTULO_ACAO = { ligar: 'Ligar', rodar: 'Rodar' };
 function chipsEntidades(ids) {
   const vis = ids.slice(0, 6).map((id) => G.nos.get(id)).filter(Boolean);
@@ -1731,7 +1803,7 @@ function pintarAnalise(d) {
     if (b.dataset.ir) { const n = G.nos.get(b.dataset.ir); if (n) { selecionar([n.id], false, true); centrar(n); } }
     else if (b.dataset.irv) { const ids = b.dataset.irv.split('\u0001').filter((id) => G.nos.has(id)); selecionar(ids, false, true); ajustarEm(ids.map((id) => G.nos.get(id))); }
     else if (b.dataset.ac) executarAcao(ps[b.dataset.ac].acao);
-    else if (b.dataset.desc) { const p = ps[b.dataset.desc]; G.inv.descartadas = [...(G.inv.descartadas || []), p.tipo + '|' + p.titulo].slice(-300); V.pistas = ps.filter((x) => x !== p); agendarSalvar(); pintarDetalhes(); }
+    else if (b.dataset.desc) { const p = ps[b.dataset.desc]; G.inv.descartadas = [...(G.inv.descartadas || []), chavePista(p)].slice(-300); V.pistas = ps.filter((x) => x !== p); agendarSalvar(); pintarDetalhes(); }
     else if (b.hasAttribute('data-pensar')) { G.inv.descartadas = []; calcularPistas(); }
     else if (b.hasAttribute('data-ligar-todas')) { lembrar(); for (const p of ligacoes) ligar(p.acao.de, p.acao.para, p.acao.rotulo, 'pista'); historico(`${ligacoes.length} ligações sugeridas aplicadas`); mudou(); }
     else if (b.hasAttribute('data-ia-cfg')) plugin.settings.open();
@@ -1755,7 +1827,7 @@ function pintarResultadoIA(r) {
     ${r.hipoteses.length ? `<h5>Hipóteses</h5>${r.hipoteses.map((h) => `<div class="btg-hip c-${h.confianca === 'alta' ? 'alta' : h.confianca === 'média' ? 'media' : 'baixa'}"><span class="btg-conf">${esc(h.confianca)}</span><p>${esc(h.texto)}</p>${h.entidades.length ? chipsEntidades(h.entidades) : ''}</div>`).join('')}` : ''}
     ${r.ligacoes.length ? `<h5>Ligações que a IA sugere</h5>${r.ligacoes.map((l, i) => `<div class="btg-sug"><div><b>${esc(nome(l.de))}</b> → ${esc(l.rotulo)} → <b>${esc(nome(l.para))}</b><p>${esc(l.motivo)}</p></div><button class="chip" data-ial="${i}">${IC.ligar}Ligar</button></div>`).join('')}` : ''}
     ${r.entidades.length ? `<h5>Entidades para buscar</h5>${r.entidades.map((e, i) => `<div class="btg-sug"><div><span class="btg-tag" style="--c:${tipo(e.tipo).cor}">${esc(tipo(e.tipo).nome)}</span> <b>${esc(curto(e.valor, 40))}</b><p>${esc(e.motivo)}</p></div><button class="chip" data-iae="${i}"${G.nos.has(e.id) ? ' disabled' : ''}>${IC.mais}${G.nos.has(e.id) ? 'Já está' : 'Adicionar'}</button></div>`).join('')}` : ''}
-    ${r.proximos.length ? `<h5>Próximos passos <button class="btg-link-btn" data-iap-todos>Rodar todos</button></h5>${r.proximos.map((p, i) => `<div class="btg-sug"><div><b>${esc(transf(p.t).nome)}</b> em ${esc(nome(p.id))}<p>${esc(p.motivo)}</p></div><button class="chip" data-iap="${i}">${IC.raio}Rodar</button></div>`).join('')}` : ''}
+    ${r.proximos.length ? `<h5>Próximos passos <button class="btg-link-btn" data-iap-todos>Rodar todos</button></h5>${r.proximos.map((p, i) => `<div class="btg-sug"><div><b>${esc((transf(p.t) || { nome: p.t }).nome)}</b> em ${esc(nome(p.id))}<p>${esc(p.motivo)}</p></div><button class="chip" data-iap="${i}">${IC.raio}Rodar</button></div>`).join('')}` : ''}
     ${r.concluido ? '<p class="btg-mudo">A IA considera o objetivo atingido.</p>' : ''}
   </div>`;
 }
@@ -1809,7 +1881,7 @@ async function piloto(objetivo, cfg) {
     if (r.concluido || !r.proximos.length) { historico(`Piloto automático: a IA parou na rodada ${i}${r.concluido ? ' (objetivo atingido)' : ''}`); break; }
     const passos = r.proximos.slice(0, 6);
     V.ia.etapa = `Rodada ${i} de ${rodadas}: rodando ${passos.length} ${passos.length === 1 ? 'transformação' : 'transformações'}…`; pintarDetalhes();
-    historico(`Piloto automático, rodada ${i}: ${passos.map((p) => transf(p.t).nome).join(', ')}`);
+    historico(`Piloto automático, rodada ${i}: ${passos.map((p) => (transf(p.t) || { nome: p.t }).nome).join(', ')}`);
     await Promise.all(passos.map((p) => { const n = G.nos.get(p.id); return n ? enfileirar(p.t, [n]) : null; }));
   }
   if (V.ia.cancelar) return;
@@ -1871,7 +1943,7 @@ function iniciar() {
   if (iniciando) return iniciando;
   iniciando = (async () => {
     try { await catalogo(); } catch (e) { R.vazio.hidden = false; R.vazio.innerHTML = `<div class="btg-vazio-c"><h3>O servidor do Bluetego não respondeu</h3><p>${esc(e.message)}</p><p class="btg-mudo">O Bluetego precisa do Node.js 18 ou mais novo (janela SDKs da IDE).</p></div>`; iniciando = null; return; }
-    AP.dados = (await plugin.data.get('aprendizado', {}).catch(() => ({}))) || {};
+    AP.dados = limparAprendizado((await plugin.data.get('aprendizado', {}).catch(() => ({}))) || {});
     await listar();
     const ultima = await plugin.data.get('ultima', null).catch(() => null);
     const qual = G.lista.find((x) => x.id === ultima) || G.lista[0];
@@ -1897,15 +1969,16 @@ function pintarVazio() {
   R.vazio.innerHTML = `<div class="btg-vazio-c">
     <div class="btg-vazio-ic">${ICON}</div>
     <h3>Comece por uma entidade</h3>
-    <p>Um domínio, um IP, um e-mail, um apelido, um CVE. Depois clique com o botão direito nela para puxar o que está ligado.</p>
+    <p>Um domínio, um IP, um e-mail, um apelido, um CVE. Enter põe no grafo e já roda as transformações rápidas; depois escolha uma entidade para ver as outras transformações (ou use o botão direito).</p>
     <div class="btg-comeco"><input data-v placeholder="exemplo.com.br" spellcheck="false"><button class="chip primary" data-ok>Investigar</button></div>
     <div class="btg-exemplos">${EXEMPLOS.map((x) => `<button class="btg-ex" data-ex="${esc(x)}">${esc(x)}</button>`).join('')}</div>
-    <p class="btg-mudo">ou <button class="btg-link" data-colar>cole um texto</button> e o Bluetego acha as entidades nele.</p></div>`;
+    <p class="btg-mudo">ou <button class="btg-link" data-colar>cole um texto</button> e o Bluetego acha as entidades nele · <button class="btg-link" data-atalhos>atalhos do teclado (?)</button></p></div>`;
   const v = R.vazio.querySelector('[data-v]');
   const ir = async () => { if (!v.value.trim()) return v.focus(); try { const n = await adicionarValor(v.value); v.value = ''; if (n) rapidas([n]); } catch (e) { toast(e.message, 'err'); } };
   R.vazio.querySelector('[data-ok]').onclick = ir;
   v.onkeydown = (e) => { if (e.key === 'Enter') ir(); };
   R.vazio.querySelector('[data-colar]').onclick = () => dlgColar();
+  R.vazio.querySelector('[data-atalhos]').onclick = () => dlgAtalhos();
   R.vazio.querySelectorAll('[data-ex]').forEach((b) => (b.onclick = () => { v.value = b.dataset.ex; v.focus(); }));
 }
 function pintarLegenda() {
@@ -1924,7 +1997,7 @@ function pintarFila() {
   R.fila.hidden = !ativo;
   if (!ativo) return;
   const pct = F.total ? Math.round((F.feitos / F.total) * 100) : 0;
-  R.fila.innerHTML = `<span class="btg-giro"></span><div class="btg-fila-t"><b>${F.maquina ? `${esc(F.maquina.nome)} · passo ${F.maquina.passo} de ${F.maquina.total}` : 'Transformando'}</b><span>${F.maquina && F.maquina.atual ? esc(F.maquina.atual) + ' · ' : ''}${F.feitos} de ${F.total}${F.erros.length ? ` · ${F.erros.length} com erro` : ''}</span><i style="width:${pct}%"></i></div><button class="icon-btn" data-parar title="Parar">${IC.x}</button>`;
+  R.fila.innerHTML = `<span class="btg-giro"></span><div class="btg-fila-t"><b>${F.maquina ? `${esc(F.maquina.nome)} · passo ${F.maquina.passo} de ${F.maquina.total}` : 'Transformando'}</b><span>${F.maquina && F.maquina.atual ? esc(F.maquina.atual) + ' · ' : ''}${F.feitos} de ${F.total}${F.erros.length ? ` · ${F.erros.length} com erro` : ''}</span><i style="width:${pct}%"></i></div><button class="chip" data-parar title="Parar: o que está na fila não roda; o que já voltou fica no grafo (Ctrl+Z desfaz tudo)"${F.cancelar ? ' disabled' : ''}>${IC.x}<span>${F.cancelar ? 'Parando…' : 'Parar'}</span></button>`;
   R.fila.querySelector('[data-parar]').onclick = cancelarFila;
 }
 
@@ -2037,7 +2110,7 @@ function detalheResumo(d) {
     <div class="btg-num"><div><b>${nos.length}</b><span>entidades</span></div><div><b>${G.lig.size}</b><span>ligações</span></div><div><b>${alertas.length}</b><span>alertas</span></div></div>
     ${alertas.length ? `<div class="btg-sec"><h4>Pontos de atenção <span>${alertas.length}</span></h4>${alertas.slice(0, 30).map((n) => item(n, tipo(n.tipo).nome)).join('')}</div>` : ''}
     ${pontos.length ? `<div class="btg-sec"><h4>Pontos de encontro</h4><p class="btg-mudo">As entidades com mais ligações: a infraestrutura ou as pessoas que unem a investigação.</p>${pontos.map(([n, g]) => item(n, g + ' ligações')).join('')}</div>` : ''}
-    <div class="btg-sec"><h4>Atalhos</h4><table class="btg-props btg-atalhos">
+    <div class="btg-sec"><h4>Atalhos<button class="btg-link-btn" data-atalhos title="Todos os atalhos do teclado (?)">Ver todos (?)</button></h4><table class="btg-props btg-atalhos">
       <tr><th>Duplo clique</th><td>na entidade: rodar as rápidas · no fundo: adicionar</td></tr>
       <tr><th>Botão direito</th><td>transformações, máquinas, marcar, remover</td></tr>
       <tr><th>Shift + arrastar</th><td>selecionar várias</td></tr>
@@ -2045,7 +2118,7 @@ function detalheResumo(d) {
       <tr><th>F · Ctrl+Z · Del</th><td>ajustar · desfazer · remover</td></tr>
     </table></div>
     <div class="btg-sec"><h4>Histórico</h4>${G.inv.historico.length ? `<ul class="btg-hist">${G.inv.historico.slice(0, 40).map((h) => `<li><span>${esc(quando(h.quando))}</span>${esc(h.texto)}</li>`).join('')}</ul>` : '<p class="btg-mudo">Nada ainda.</p>'}</div>`;
-  d.onclick = (e) => { const b = e.target.closest('[data-ir]'); if (b) { const o = G.nos.get(b.dataset.ir); if (o) { selecionar([o.id]); centrar(o); } } };
+  d.onclick = (e) => { if (e.target.closest('[data-atalhos]')) return dlgAtalhos(); const b = e.target.closest('[data-ir]'); if (b) { const o = G.nos.get(b.dataset.ir); if (o) { selecionar([o.id]); centrar(o); } } };
 }
 
 // ---------- painel da esquerda ----------
@@ -2057,8 +2130,8 @@ function pintarLado() {
   for (const n of G.nos.values()) por[n.tipo] = (por[n.tipo] || 0) + 1;
   lado.innerHTML = `
     <div class="btg-lado-h"><span>Investigações</span><button class="icon-btn" data-nova title="Nova investigação">${IC.mais}</button></div>
-    ${G.lista.map((x) => `<div class="btg-inv${G.inv && x.id === G.inv.id ? ' on' : ''}" data-id="${esc(x.id)}" title="Alterada ${esc(quando(x.alterada))}"><span class="nm">${esc(x.nome)}</span><span class="sub">${x.n}</span><button class="icon-btn btg-mais" data-apagar="${esc(x.id)}" title="Apagar">${IC.lixo}</button></div>`).join('') || '<div class="btg-mudo btg-pad">Nenhuma ainda.</div>'}
-    ${Object.keys(por).length ? `<div class="btg-lado-h"><span>Tipos no grafo</span></div>${Object.entries(por).sort((a, b) => b[1] - a[1]).map(([k, q]) => `<div class="btg-tipo${V.ocultos.has(k) ? ' off' : ''}" data-tipo="${k}" title="Clique para ${V.ocultos.has(k) ? 'mostrar' : 'esconder'}"><span class="btg-pt" style="background:${tipo(k).cor}"></span><span class="nm">${esc(tipo(k).nome)}</span><span class="sub">${q}</span></div>`).join('')}` : ''}
+    ${G.lista.map((x) => `<div class="btg-inv${G.inv && x.id === G.inv.id ? ' on' : ''}" data-id="${esc(x.id)}" tabindex="0" role="button" title="Alterada ${esc(quando(x.alterada))}"><span class="nm">${esc(x.nome)}</span><span class="sub">${x.n}</span><button class="icon-btn btg-mais" data-apagar="${esc(x.id)}" title="Apagar a investigação" aria-label="Apagar ${esc(x.nome)}">${IC.lixo}</button></div>`).join('') || '<div class="btg-mudo btg-pad">Nenhuma ainda.</div>'}
+    ${Object.keys(por).length ? `<div class="btg-lado-h"><span>Tipos no grafo</span></div>${Object.entries(por).sort((a, b) => b[1] - a[1]).map(([k, q]) => `<div class="btg-tipo${V.ocultos.has(k) ? ' off' : ''}" data-tipo="${k}" tabindex="0" role="button" aria-pressed="${!V.ocultos.has(k)}" title="Clique para ${V.ocultos.has(k) ? 'mostrar' : 'esconder'}"><span class="btg-pt" style="background:${tipo(k).cor}"></span><span class="nm">${esc(tipo(k).nome)}</span><span class="sub">${q}</span></div>`).join('')}` : ''}
     <div class="btg-lado-h"><span>Fontes</span></div>
     <div class="btg-mudo btg-pad">DNS do Google e da Cloudflare, crt.sh, RDAP, RIPEstat, Shodan InternetDB, ipwho.is, Wayback Machine, GitHub, Gravatar, MITRE e FIRST. VirusTotal com a sua chave no Cofre.</div>`;
 }
@@ -2071,6 +2144,7 @@ lado.onclick = async (e) => {
   const t = e.target.closest('[data-tipo]');
   if (t) alternarTipo(t.dataset.tipo);
 };
+lado.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.btg-inv, .btg-tipo')) { e.preventDefault(); e.target.click(); } };
 function abrirPagina() { if (!bs.pages.isActive('bluetego')) bs.pages.open('bluetego'); }
 
 // ---------- a partir do editor e do Buscar em tudo ----------

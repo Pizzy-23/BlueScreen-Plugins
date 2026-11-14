@@ -4,7 +4,7 @@
 | | |
 |---|---|
 | **Autor** | Martin Hartfelder |
-| **Versão** | 0.6.0 |
+| **Versão** | 0.7.0 |
 | **Licença** | MIT |
 | **Categoria** | Outros |
 | **Precisa de** | BlueScreen 2.1.33 ou mais novo · Node.js 18+ |
@@ -15,7 +15,7 @@ Investigação OSINT em grafo dentro do BlueScreen, no estilo do Maltego: você 
 
 O que ele faz diferente do Maltego:
 
-- **Sem conta, sem licença, sem créditos.** As 90 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
+- **Sem conta, sem licença, sem créditos.** As 91 transformações usam fontes públicas e gratuitas. VirusTotal, token do GitHub e API da Anthropic são opcionais, com a chave guardada no Cofre da IDE.
 - **O grafo pensa junto.** A aba **Análise** mostra pistas que o Bluetego tira sozinho (ligações que faltam, infraestrutura em comum, próximos passos), e a **IA** (os agentes da IDE, a API da Anthropic ou um Ollama local) analisa, responde perguntas e conduz a investigação no **piloto automático**.
 - **O que as ferramentas especializadas fazem, num lugar só:** contas em até 2.434 sites (regras do Maigret), subdomínios de 4 fontes (como o Amass), metadados de documentos (como o FOCA), exploração do site (robots, sitemap, JavaScript, `.git` e `.env` expostos), pivôs por ID de rastreamento e buscas prontas.
 - **Máquinas prontas** que encadeiam transformações como um investigador faria à mão.
@@ -48,7 +48,8 @@ Também dá para **colar** (`Ctrl+V` no grafo: um valor é investigado na hora, 
 | Setas | andar para a entidade vizinha |
 | `F` · `M` · `T` · `P` | ajustar à tela · minimapa · linha do tempo · painel |
 | **Shift + arrastar** · **Ctrl + clique** | selecionar várias · somar à seleção |
-| `Ctrl+Z` · `Ctrl+Y` · `Del` · `Ctrl+C` · `?` | desfazer · refazer · remover · copiar os valores · todos os atalhos |
+| `Ctrl+Z` · `Ctrl+Y` · `Del` · `Ctrl+C` · `?` | desfazer · refazer · remover · copiar os valores · todos os atalhos (funcionam em qualquer lugar da página, menos em campos de texto) |
+| `Ctrl+F` · `/` | buscar no grafo (o campo mostra quantas entidades achou) |
 | **Buscar em tudo** | "Bluetego: abrir", "Bluetego: nova investigação", "Bluetego: extrair entidades da seleção do editor" |
 | Botão direito num arquivo do projeto | **Extrair entidades no Bluetego** |
 
@@ -127,6 +128,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | Apelido | ⚡ Contas com este nome em 19 sites, com nome, cidade, empresa e site de cada perfil; provas do Keybase | APIs dos sites |
 | Apelido | Contas em centenas de sites (até 2.434, os mais conhecidos primeiro), cada achado reconferido | regras do Maigret |
 | Apelido | GitHub a fundo: e-mails dos commits e das chaves GPG, chaves SSH, repositórios, linguagens, organizações, quem segue e é seguido | GitHub |
+| Apelido, conta, URL, e-mail | Investigar os commits: o fuso horário real (cada commit guarda o do computador), o horário e os dias em que a pessoa trabalha, os nomes e e-mails usados (com o fuso de cada um), o nome do computador vazado em e-mail mal configurado, coautores, repositórios de terceiros em que contribui, quanto assina os commits e o idioma das mensagens; robôs e IA ficam à parte | GitHub |
 | Conta | ⚡ Nome de usuário da conta (para procurar o mesmo nome em outros sites) | local |
 | Pessoa | ⚡ Pessoa pública: cargos, onde trabalha e estudou, contas oficiais | Wikidata |
 | Pessoa | ⚡ Quantas pessoas no Brasil têm o primeiro nome (risco de homônimo) e a década mais comum de nascimento | IBGE (Censo) |
@@ -171,7 +173,7 @@ As marcadas com ⚡ são as rápidas, que o duplo clique roda.
 | **Raio-x do IP** | IP | DNS reverso, sistema autônomo, dono do bloco, localização, portas e vulnerabilidades |
 | **Inteligência de ameaça** | IP | relatórios de ameaça, domínios que já apontaram para o IP e a reputação de cada um |
 | **Quem é este e-mail** | E-mail | domínio, Gravatar, contas do GitHub com o e-mail, a web e o mesmo nome de usuário em outros sites |
-| **Rastro do apelido** | Apelido | contas em 18 sites com os dados de cada perfil e em centenas de outros, o GitHub a fundo, a web e o Gravatar dos e-mails |
+| **Rastro do apelido** | Apelido | contas em 18 sites com os dados de cada perfil e em centenas de outros, o GitHub a fundo (inclusive o fuso e os horários dos commits), a web e o Gravatar dos e-mails |
 | **Pegada da pessoa** | Pessoa | Quantas pessoas têm o nome (IBGE), Wikidata, ORCID, Wikipédia, mandatos na Câmara e no Senado, sanções, TCU, processos no STF, Diário Oficial da União, Offshore Leaks, livros, Nobel, chaves PGP, contas com o nome (GitHub, Bluesky, fediverso, Stack Overflow, Launchpad), a web, e os apelidos prováveis com as contas que existem |
 | **Empresa brasileira** | CNPJ | Receita, as empresas sócias e a matriz, CEP, Wikidata e o domínio do e-mail |
 | **Rastro do telefone** | Telefone | tipo, operadora original e região, organizações e estabelecimentos com este telefone (Wikidata, OpenStreetMap), apps de mensagem, onde o número aparece na web e o que essas páginas citam |
@@ -233,6 +235,9 @@ node tests/fontes.test.mjs
 node tests/nomes.test.mjs
 node tests/contatos.test.mjs
 node tests/telefones.test.mjs
+node tests/github.test.mjs
+node tests/bugs.test.mjs
+node tests/raciocinio.test.mjs
 ```
 
 Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica fica em `lib/`: `entidades.mjs` (tipos, detecção, normalização e extração), `transformacoes.mjs` (as transformações), `maquinas.mjs`, `pistas.mjs` (o raciocínio sem IA), `metadados.mjs` (PDF e Office, sem dependências), `maigret.mjs` (a busca ampla de contas) e `ia.mjs` (o pedido e a conferência da resposta da IA). O `server.mjs` liga a rede, o cache e as rotas; o `ui.js` desenha o grafo num canvas, sem bibliotecas de fora.
@@ -242,6 +247,31 @@ Os testes não usam a rede: cada fonte responde por um `fetch` falso. A lógica 
 Feito por Martin Hartfelder. Licença MIT (veja o campo `license` do `plugin.json`).
 
 ## Histórico de versões
+
+### 0.7.0
+
+- **Investigar os commits do GitHub** (de um usuário, um repositório ou um e-mail): o fuso horário real de quem faz os commits, o horário e os dias em que trabalha, todos os nomes e e-mails usados (com o fuso de cada um), o nome do computador quando ele vaza no e-mail do commit, coautores, repositórios de terceiros, assinatura e idioma. Datas impossíveis (forjadas) são descartadas e o resultado diz quantos commits estão nos repositórios do próprio usuário, porque qualquer um pode fazer um commit "como" outra pessoa. Entra no "Rastro do apelido".
+- **19 bugs corrigidos no motor**, cada um com teste:
+  - o cache misturava textos que começam igual;
+  - erro que não é de conexão deixava um site "fora do ar" por 2 minutos;
+  - número de versão virava IP e intervalo de anos virava telefone;
+  - o mesmo IPv6 escrito de dois jeitos virava duas entidades;
+  - PDF cortado ou `%` malformado numa página derrubava a transformação;
+  - entre outros.
+- **Máquinas mais econômicas:** as buscas por nome rodam só na pessoa investigada, não em cada nome achado no caminho; passos caros têm teto; a ordem foi corrigida (os e-mails da chave PGP agora são olhados). Um teste confere todas as máquinas contra o catálogo.
+- **IA mais segura:** o texto coletado de páginas vai delimitado como dado (não é obedecido), o piloto só roda o que foi oferecido, resposta malformada não derruba e o pedido cabe no limite com grafos grandes.
+- **Pistas novas:** alerta de sanção, TCU, STF e Offshore Leaks em destaque (com aviso de homônimo), cautela com homônimos, CNPJ e telefone achados para consultar, outros e-mails da chave PGP, mesma pessoa em fontes diferentes.
+- **Interface:**
+  - o nome da entidade principal aparece mesmo cercada de vizinhos;
+  - os nomes dos grupos e das ligações não se sobrepõem;
+  - nova investigação começa com a câmera certa;
+  - a busca mostra quantas achou e destaca os nomes;
+  - os atalhos funcionam fora do grafo;
+  - "Parar" na fila;
+  - janela estreita reorganiza a barra e o painel;
+  - foco visível e rótulos para leitores de tela;
+  - investigação aberta sem posições não trava mais.
+- Valor só com pontuação ("???") não vira entidade.
 
 ### 0.6.0
 

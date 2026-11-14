@@ -77,9 +77,34 @@ export function ehIPv6(v) {
   if (!/^[0-9a-f:.]+$/i.test(s) || !s.includes(':')) return false;
   const duplo = s.split('::');
   if (duplo.length > 2) return false;
-  const grupos = s.replace('::', ':x:').split(':').filter((g) => g && g !== 'x');
-  if (grupos.some((g) => !/^[0-9a-f]{1,4}$/i.test(g) && !RE.ipv4.test(g))) return false;
-  return duplo.length === 2 ? grupos.length < 8 : grupos.length === 8;
+  // dois-pontos sozinho no começo ou no fim (":1:2", "1:2:", ":::") não vale
+  if (/^:(?!:)|(?<!:):$/.test(s)) return false;
+  const grupos = duplo.flatMap((p) => (p ? p.split(':') : []));
+  if (grupos.some((g) => !g)) return false;
+  // o IPv4 embutido (::ffff:1.2.3.4) só vem no fim e ocupa dois grupos
+  const v4 = grupos.length > 0 && RE.ipv4.test(grupos[grupos.length - 1]);
+  if (grupos.some((g, i) => !/^[0-9a-f]{1,4}$/i.test(g) && !(v4 && i === grupos.length - 1))) return false;
+  const n = grupos.length + (v4 ? 1 : 0);
+  return duplo.length === 2 ? n < 8 : n === 8;
+}
+// forma canônica do IPv6 (RFC 5952): minúsculas, sem zeros à esquerda e a maior sequência de zeros como "::".
+// Sem ela, 2001:0DB8:0:0::1 e 2001:db8::1 viravam duas entidades
+export function ipv6Canonico(v) {
+  const s = String(v).trim().toLowerCase();
+  if (!ehIPv6(s) || s.includes('.')) return s;
+  const [a, b] = s.split('::');
+  const pa = a ? a.split(':') : [], pb = b ? b.split(':') : [];
+  const g = (s.includes('::') ? [...pa, ...Array(8 - pa.length - pb.length).fill('0'), ...pb] : pa).map((x) => x.replace(/^0+(?=.)/, ''));
+  let ini = -1, tam = 0;
+  for (let i = 0; i < 8; i++) {
+    if (g[i] !== '0') continue;
+    let j = i;
+    while (j < 8 && g[j] === '0') j++;
+    if (j - i > tam) { ini = i; tam = j - i; }
+    i = j;
+  }
+  if (tam < 2) return g.join(':');
+  return g.slice(0, ini).join(':') + '::' + g.slice(ini + tam).join(':');
 }
 export const ehIP = (v) => RE.ipv4.test(String(v).trim()) || ehIPv6(v);
 const tldBom = (d) => { const t = d.replace(/\.$/, '').split('.').pop().toLowerCase(); return !NAO_TLD.has(t) && !/^\d+$/.test(t); };
@@ -119,15 +144,16 @@ export function normalizar(tipo, valor) {
     case 'hash': return v.toLowerCase();
     case 'cve': return v.toUpperCase();
     case 'asn': return 'AS' + v.replace(/^AS\s?/i, '');
-    case 'ip': return ehIPv6(v) ? v.toLowerCase() : v;
-    case 'rede': return v.toLowerCase();
+    case 'ip': return ehIPv6(v) ? ipv6Canonico(v) : v;
+    case 'rede': { const [ip, bits] = v.toLowerCase().split('/'); return bits !== undefined && ehIPv6(ip) ? `${ipv6Canonico(ip)}/${bits}` : v.toLowerCase(); }
     case 'apelido': return v.replace(/^@/, '');
     case 'cpf': { const d = v.replace(/\D/g, ''); return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : v; }
     case 'cep': { const d = v.replace(/\D/g, ''); return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : v; }
     case 'cnpj': { const d = v.replace(/\D/g, ''); return d.length === 14 ? `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}` : v; }
     case 'telefone': {
       const d = v.replace(/[^\d+]/g, '');
-      if (d.startsWith('+')) { const x = '+' + d.slice(1).replace(/\+/g, ''); return (/^\+55\d{10}$/.test(x) && telefoneBR(x.slice(3))) || x; }
+      // "+55 (051) 99999-1234": o 0 de discagem depois do +55 também sai
+      if (d.startsWith('+')) { const x = '+' + d.slice(1).replace(/\+/g, ''); return (/^\+55\d{10}$/.test(x) && telefoneBR(x.slice(3))) || (/^\+550\d{10,11}$/.test(x) && telefoneBR(x.slice(4))) || x; }
       // 55 sem o + (link tel:55…) e o 0 de discagem na frente do DDD (051 3333-4444) viram o mesmo número
       return telefoneBR(d) || (/^55\d{10,11}$/.test(d) && telefoneBR(d.slice(2))) || (/^0\d{10,11}$/.test(d) && telefoneBR(d.slice(1))) || d;
     }
@@ -146,11 +172,14 @@ export function extrair(texto, limite = 500) {
     if (!v || vistos.has(k) || out.length >= limite) return;
     vistos.add(k); out.push({ tipo, valor: v });
   };
-  const limpar = (u) => u.replace(/[),.;:'"\]>}]+$/, '');
+  // pontuação do fim da frase sai; o ")" só sai se não fecha um "(" do próprio endereço (wiki/Foo_(bar))
+  const conta = (t, c) => t.split(c).length - 1;
+  const limpar = (u) => { let t = u; for (;;) { t = t.replace(/[,.;:'"\]>}]+$/, ''); if (t.endsWith(')') && conta(t, ')') > conta(t, '(')) t = t.slice(0, -1); else return t; } };
   for (const m of s.matchAll(/\bhttps?:\/\/[^\s<>"'`]+/gi)) por('url', limpar(m[0]));
   for (const m of s.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b/g)) if (tldBom(m[0].split('@')[1])) por('email', m[0]);
   for (const m of s.matchAll(/\bCVE-\d{4}-\d{4,}\b/gi)) por('cve', m[0]);
-  for (const m of s.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/g)) {
+  // quatro números com ponto dentro de uma sequência maior (versão 1.2.3.4.5, OID 1.3.6.1.4.1) não são IP
+  for (const m of s.matchAll(/(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?(?!\w|\.\d)/g)) {
     if (m[0].includes('/')) { if (RE.cidr4.test(m[0])) por('rede', m[0]); }
     else if (RE.ipv4.test(m[0])) por('ip', m[0]);
   }
@@ -166,7 +195,11 @@ export function extrair(texto, limite = 500) {
   // domínios: fora de e-mail (o domínio do e-mail sai do próprio e-mail, pela transformação)
   for (const m of s.matchAll(/(?<![@\w.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}\b(?![\w@-])/gi)) if (tldBom(m[0]) && !RE.ipv4.test(m[0]) && /[a-z]/i.test(m[0].split('.').slice(-2)[0])) por('dominio', m[0]);
   for (const m of s.matchAll(/(?<![\w/])\+\d{1,3}[\s.-]?\(?\d{1,4}\)?[\s.-]?\d{3,5}[\s.-]?\d{3,5}\b/g)) por('telefone', m[0]);
-  for (const m of s.matchAll(/(?<![\w+/.-])\(?(0?[1-9]{2})\)?[\s.-]?(9?\d{4})[\s.-](\d{4})(?![\w/-])/g)) { const t = telefoneBR(m[1].replace(/^0/, '') + m[2] + m[3]); if (t && /[()\s.-]/.test(m[0])) por('telefone', t); }
+  for (const m of s.matchAll(/(?<![\w+/.-])\(?(0?[1-9]{2})\)?[\s.-]?(9?\d{4})[\s.-](\d{4})(?![\w/-])/g)) {
+    // "11 2019-2020" é um número seguido de um intervalo de anos, não telefone (com o DDD entre parênteses, é telefone)
+    if (!m[0].includes('(') && /^(19|20)\d\d$/.test(m[2]) && /^(19|20)\d\d$/.test(m[3])) continue;
+    const t = telefoneBR(m[1].replace(/^0/, '') + m[2] + m[3]); if (t && /[()\s.-]/.test(m[0])) por('telefone', t);
+  }
   for (const m of s.matchAll(/(?<![\w/])0(800|300|500|900)[\s.-]?\d{3}[\s.-]?\d{3,4}\b|(?<![\w/])[34]00[0-9][\s.-]\d{4}\b/g)) por('telefone', m[0]);
   return out;
 }

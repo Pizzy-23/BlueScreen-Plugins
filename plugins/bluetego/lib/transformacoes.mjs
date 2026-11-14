@@ -11,6 +11,7 @@ import tls from 'node:tls';
 import { metadados } from './metadados.mjs';
 import { procurar as procurarMaigret, sitesMaigret } from './maigret.mjs';
 import { numeracao } from './numeracao.mjs';
+import { githubCommits } from './github.mjs';
 import { normalizar, chave, cnpjValido, regiaoCPF, telefoneInfo, nomeReverso, extrair, apelidosDeNome, ehIP, detectar } from './entidades.mjs';
 
 export class Falha extends Error {
@@ -23,6 +24,10 @@ const corta = (lista, ctx, total = lista.length) => {
   return { entidades: lista.slice(0, max), aviso: total > max ? `Mostrando ${max} de ${total}. Aumente o limite nas configurações para ver mais.` : '' };
 };
 const data = (s) => (s ? String(s).slice(0, 10) : '');
+// decodeURIComponent que não derruba a transformação com um "%" malformado vindo de uma página (fica o texto cru)
+const decodifica = (s) => { try { return decodeURIComponent(s); } catch { return String(s); } };
+// o host é o próprio domínio ou um subdomínio dele ("outroexemplo.com" não é de "exemplo.com")
+const doDominio = (host, dominio) => host === dominio || host.endsWith('.' + dominio);
 
 // ---------- DNS (DNS sobre HTTPS do Google, com o da Cloudflare de reserva) ----------
 const TIPOS_DNS = { A: 1, NS: 2, CNAME: 5, SOA: 6, PTR: 12, MX: 15, TXT: 16, AAAA: 28, CAA: 257 };
@@ -142,7 +147,7 @@ export async function geo(ctx, ip) {
   const lugar = [d.city, d.region, d.country].filter(Boolean).join(', ');
   const c = d.connection || {};
   const out = [];
-  if (lugar) out.push(ent('local', lugar, 'localizado em', { props: { latitude: d.latitude, longitude: d.longitude, mapa: d.latitude != null ? `https://www.openstreetmap.org/?mlat=${d.latitude}&mlon=${d.longitude}#map=10/${d.latitude}/${d.longitude}` : '' } }));
+  if (lugar) out.push(ent('local', lugar, 'localizado em', { props: d.latitude != null ? { latitude: d.latitude, longitude: d.longitude, mapa: `https://www.openstreetmap.org/?mlat=${d.latitude}&mlon=${d.longitude}#map=10/${d.latitude}/${d.longitude}` } : {} }));
   if (c.isp || c.org) out.push(ent('organizacao', c.isp || c.org, 'provedor'));
   if (c.domain) out.push(ent('dominio', c.domain, 'domínio do provedor'));
   return { entidades: out, props: { país: d.country || '', cidade: d.city || '', provedor: c.isp || c.org || '', 'fuso horário': (d.timezone && d.timezone.id) || '', aproximado: 'a localização por IP é aproximada (cidade do provedor)' } };
@@ -189,8 +194,9 @@ export async function dnsTXT(ctx, dominio) {
   for (const t of txt) {
     if (/^v=spf1/i.test(t)) {
       props.SPF = t;
-      for (const m of t.matchAll(/\binclude:([^\s]+)/gi)) out.push(ent('dominio', m[1], 'SPF autoriza'));
-      for (const m of t.matchAll(/\bip4:([^\s]+)/gi)) out.push(m[1].includes('/') ? ent('rede', m[1], 'SPF autoriza') : ent('ip', m[1], 'SPF autoriza'));
+      // include com macro (%{i}._spf...) ou endereço malformado não vira entidade
+      for (const m of t.matchAll(/\binclude:([^\s]+)/gi)) if (/^[a-z0-9_.-]+\.[a-z]{2,24}\.?$/i.test(m[1])) out.push(ent('dominio', m[1], 'SPF autoriza'));
+      for (const m of t.matchAll(/\bip4:([^\s]+)/gi)) { const tp = detectar(m[1]); if (tp === 'rede' || tp === 'ip') out.push(ent(tp, m[1], 'SPF autoriza')); }
       continue;
     }
     const v = VERIFICACOES.find(([re]) => re.test(t));
@@ -210,8 +216,8 @@ export function lerPagina(html, base) {
   const gerador = pega(/<meta[^>]+name=["']generator["'][^>]+content=["']([^"']{1,120})/i);
   const hrefs = [...s.matchAll(/(?:href|src)=["']([^"'#\s]+)["']/gi)].map((m) => { try { return new URL(m[1].replace(/&amp;/g, '&'), base).href; } catch { return ''; } }).filter(Boolean);
   const host = (() => { try { return new URL(base).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-  const emails = [...new Set([...s.matchAll(/mailto:([^"'?\s>]+)/gi)].map((m) => decodeURIComponent(m[1])).concat(extrair(s.replace(/<[^>]+>/g, ' ')).filter((e) => e.tipo === 'email').map((e) => e.valor)).map((e) => e.toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e) && !/\.(png|jpe?g|gif|svg|webp)$/i.test(e) && !/sentry|wixpress|example\.|@(domain|email|seudominio|yourdomain|dominio|empresa)\.com$|^(you|your|seu|seuemail|meuemail|nome|name|email|exemplo|example|teste|test|fulano)@/i.test(e)))];
-  const telefones = [...new Set([...s.matchAll(/href=["']tel:([^"']+)["']/gi)].map((m) => decodeURIComponent(m[1]).trim()))];
+  const emails = [...new Set([...s.matchAll(/mailto:([^"'?\s>]+)/gi)].map((m) => decodifica(m[1])).concat(extrair(s.replace(/<[^>]+>/g, ' ')).filter((e) => e.tipo === 'email').map((e) => e.valor)).map((e) => e.toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e) && !/\.(png|jpe?g|gif|svg|webp)$/i.test(e) && !/sentry|wixpress|example\.|@(domain|email|seudominio|yourdomain|dominio|empresa)\.com$|^(you|your|seu|seuemail|meuemail|nome|name|email|exemplo|example|teste|test|fulano)@/i.test(e)))];
+  const telefones = [...new Set([...s.matchAll(/href=["']tel:([^"']+)["']/gi)].map((m) => decodifica(m[1]).trim()).filter((t) => t.replace(/\D/g, '').length >= 8))];
   // perfis do próprio site (o github.com lendo o github.com) e arquivos (manifest.json, ícones) não são perfis
   const doSite = (h) => { try { const x = new URL(h).hostname.replace(/^www\./, ''); return x === host || x.endsWith('.' + host); } catch { return true; } };
   const sociais = [...new Set(hrefs.filter((h) => SOCIAIS.test(h) && !doSite(h) && !/\.(xml|json|png|jpe?g|svg|ico|css|js)$/i.test(h.replace(/[?#].*$/, ''))).map((h) => h.replace(/[?#].*$/, '').replace(/\/$/, '')))].filter((h) => !/\/(sharer|share|intent|plugins|dialog|hashtag)\b/i.test(h));
@@ -354,7 +360,8 @@ export async function urlSeguir(ctx, url) {
     ultima = r;
     const destino = r.headers && r.headers.location;
     if (r.status >= 300 && r.status < 400 && destino) {
-      const prox = new URL(destino, atual).href;
+      let prox;
+      try { prox = new URL(destino, atual).href; } catch { break; }
       out.push(ent('url', prox, `redireciona (${r.status})`, { de: i === 0 ? undefined : { tipo: 'url', valor: normalizar('url', atual) } }));
       atual = prox;
       continue;
@@ -548,7 +555,7 @@ export function contaApelido(_ctx, url) {
   try { u = new URL(url); } catch { throw new Falha('a conta precisa ser o link do perfil'); }
   if (/^(wa\.me|signal\.me)$/i.test(u.hostname) || /^\/\+/.test(u.pathname)) return { entidades: [], aviso: 'Este link é de um telefone, não de um nome de usuário.' };
   const partes = u.pathname.split('/').filter(Boolean).filter((p) => !['in', 'company', 'user', 'u', 'c', 'channel', 'profile', 'school', 'id', 'users', 'wiki'].includes(p.toLowerCase()));
-  const nome = decodeURIComponent(partes[0] || u.searchParams.get('id') || '').replace(/^[@~]/, '').replace(/^Usu[aá]rio:/i, '').replace(/\.bsky\.social$/, '');
+  const nome = decodifica(partes[0] || u.searchParams.get('id') || '').replace(/^[@~]/, '').replace(/^Usu[aá]rio:/i, '').replace(/\.bsky\.social$/, '');
   if (!nome) return { entidades: [], aviso: 'Não deu para tirar um nome de usuário deste link.' };
   return { entidades: [ent('apelido', nome, 'usuário da conta')] };
 }
@@ -561,7 +568,7 @@ export function lerBusca(html) {
     if (!a) continue;
     let url = a[1].replace(/&amp;/g, '&');
     const uddg = url.match(/[?&]uddg=([^&]+)/);
-    if (uddg) url = decodeURIComponent(uddg[1]);
+    if (uddg) url = decodifica(uddg[1]);
     if (url.startsWith('//')) url = 'https:' + url;
     if (!/^https?:\/\//.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue;
     out.push({ url, titulo: tira(a[2]), trecho: tira((bloco.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/) || [])[1]) });
@@ -607,7 +614,7 @@ export function consultaWeb(tipo, valor) {
 // a consulta (o Bing com OR, por exemplo) devolve páginas sem nada a ver, e elas não entram
 const semAcento_ = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 export function citaTermo(r, tipo, valor) {
-  const alvo = semAcento_(`${r.titulo} ${r.trecho} ${decodeURIComponent(String(r.url).replace(/%(?![0-9a-f]{2})/gi, ''))}`);
+  const alvo = semAcento_(`${r.titulo} ${r.trecho} ${decodifica(String(r.url).replace(/%(?![0-9a-f]{2})/gi, ''))}`);
   if (tipo === 'telefone' || tipo === 'cnpj' || tipo === 'cpf') {
     const d = String(valor).replace(/\D/g, ''), so = alvo.replace(/\D/g, '');
     return so.includes(tipo === 'telefone' ? d.slice(-8) : d);
@@ -677,7 +684,7 @@ export async function cve(ctx, id) {
   try { epss = ((await ctx.json(`https://api.first.org/data/v1/epss?cve=${encodeURIComponent(id)}`)).data || [])[0] || null; } catch {}
   return {
     entidades: unicos(out).slice(0, Math.max(1, Number(ctx.limite) || 40)),
-    props: { resumo: ((cna.descriptions || [])[0] || {}).value || '', CVSS: m.baseScore ? `${m.baseScore} (${m.baseSeverity || ''})` : '', publicado: data(d.cveMetadata && d.cveMetadata.datePublished), produtos: (cna.affected || []).map((a) => a.product).filter(Boolean).slice(0, 6).join(', '), EPSS: epss ? `${(Number(epss.epss) * 100).toFixed(1)}% de chance de exploração em 30 dias` : '' },
+    props: { resumo: ((cna.descriptions || [])[0] || {}).value || '', CVSS: m.baseScore ? `${m.baseScore} (${m.baseSeverity || ''})` : '', publicado: data(d.cveMetadata && d.cveMetadata.datePublished), produtos: (cna.affected || []).map((a) => a.product).filter(Boolean).slice(0, 6).join(', '), EPSS: epss && epss.epss !== '' && Number.isFinite(Number(epss.epss)) ? `${(Number(epss.epss) * 100).toFixed(1)}% de chance de exploração em 30 dias` : '' },
   };
 }
 export function textoEntidades(_ctx, texto, completo) {
@@ -1149,7 +1156,7 @@ export async function documentos(ctx, dominio) {
   } catch {}
   try {
     const r = await ctx.pagina(`https://${dominio}/`, { navegador: true });
-    for (const m of String(r.texto).matchAll(/href=["']([^"']+)["']/gi)) { try { const u = new URL(m[1].replace(/&amp;/g, '&'), r.url).href; if (EXT_DOC.test(u) && new URL(u).hostname.endsWith(dominio)) cand.set(u, cand.get(u) || ''); } catch {} }
+    for (const m of String(r.texto).matchAll(/href=["']([^"']+)["']/gi)) { try { const u = new URL(m[1].replace(/&amp;/g, '&'), r.url).href; if (EXT_DOC.test(u) && doDominio(new URL(u).hostname, dominio)) cand.set(u, cand.get(u) || ''); } catch {} }
   } catch {}
   const lista = [...cand.entries()].slice(0, max);
   if (!lista.length) return { entidades: [], aviso: 'Nenhum documento público (PDF, Word, Excel, PowerPoint) achado no site nem na Wayback Machine.' };
@@ -1158,10 +1165,12 @@ export async function documentos(ctx, dominio) {
   for (const [url, ts] of lista) {
     let b = await ctx.binario(url, { max: 15_000_000 }).catch(() => null);
     if ((!b || !b.dados) && ts) b = await ctx.binario(`https://web.archive.org/web/${ts}id_/${url}`, { max: 15_000_000 }).catch(() => null);
-    const md = b && b.dados ? metadados(b.dados, url) : null;
+    // um arquivo corrompido ou cortado não derruba a leitura dos outros
+    let md = null;
+    try { md = b && b.dados ? metadados(b.dados, url) : null; } catch {}
     if (!md) continue;
     lidos++;
-    const doc = ent('url', url, 'documento publicado', { rotulo: `${md.tipo}: ${curtoT(md.titulo || decodeURIComponent(url.split('/').pop().split('?')[0]), 50)}`, props: { título: md.titulo || '', autor: md.autor || '', 'último a editar': md.ultimoAutor || '', programa: [md.programa, md.produtor].filter(Boolean).join(' / '), empresa: md.empresa || '', criado: md.criado || '', modificado: md.modificado || '', caminhos: (md.caminhos || []).join(' | '), cifrado: md.cifrado || '' } });
+    const doc = ent('url', url, 'documento publicado', { rotulo: `${md.tipo}: ${curtoT(md.titulo || decodifica(url.split('/').pop().split('?')[0]), 50)}`, props: { título: md.titulo || '', autor: md.autor || '', 'último a editar': md.ultimoAutor || '', programa: [md.programa, md.produtor].filter(Boolean).join(' / '), empresa: md.empresa || '', criado: md.criado || '', modificado: md.modificado || '', caminhos: (md.caminhos || []).join(' | '), cifrado: md.cifrado || '' } });
     out.push(doc);
     const de = { tipo: 'url', valor: doc.valor };
     // nome de gente vira pessoa; login (jsilva, admin.ti) vira apelido; nome genérico de cargo ou máquina fica só na propriedade
@@ -1611,7 +1620,7 @@ export async function hashlookup(ctx, hash) {
 export async function infostealer(ctx, dominio) {
   const d = await ctx.json(`https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-domain?domain=${encodeURIComponent(dominio)}`, { timeout: 40000 });
   if (!d || !d.total) return { entidades: [], props: { infostealer: 'nenhum computador infectado conhecido com acesso a este domínio' } };
-  const urls = ((d.data && d.data.employees_urls) || []).filter((u) => { try { return new URL(u.url).hostname.endsWith(dominio); } catch { return false; } }).sort((a, b) => b.occurrence - a.occurrence).slice(0, 10);
+  const urls = ((d.data && d.data.employees_urls) || []).filter((u) => { try { return doDominio(new URL(u.url).hostname, dominio); } catch { return false; } }).sort((a, b) => b.occurrence - a.occurrence).slice(0, 10);
   const out = urls.map((u) => ent('url', u.url, 'login vazado por infostealer', { alerta: true, props: { ocorrências: u.occurrence } }));
   const alerta = (d.employees || 0) > 0;
   return {
@@ -1756,7 +1765,7 @@ export async function tcu(ctx, nome) {
   const out = [];
   for (const x of hits.slice(0, 10)) {
     out.push(ent('organizacao', 'Tribunal de Contas da União', x.lista === 'inabilitados' ? 'inabilitado(a) para cargo público pelo TCU' : 'proibido(a) de licitar pelo TCU (inidôneo)', { alerta: true, props: { processo: x.processo || '', acórdão: x.deliberacao || '', desde: data(x.data_transito_julgado), até: data(x.data_final), local: [x.municipio, x.uf].filter(Boolean).join(' - ') } }));
-    if (x.municipio) out.push(ent('local', `${x.municipio} - ${x.uf}`, 'município na condenação do TCU'));
+    if (x.municipio) out.push(ent('local', [x.municipio, x.uf].filter(Boolean).join(' - '), 'município na condenação do TCU'));
   }
   return { entidades: unicos(out), alerta: hits.length > 0, props: { TCU: hits.length ? hits.map((x) => `${x.lista === 'inabilitados' ? 'inabilitado' : 'inidôneo'} até ${data(x.data_final)} (${x.deliberacao})`).join('; ') : 'nada consta', risco: hits.length ? 'condenação no TCU: confira município e processo para descartar homônimo' : '' } };
 }
@@ -1780,7 +1789,7 @@ export async function parlamentar(ctx, nome) {
     const ms = mandatos.filter((x) => x.id === id);
     out.push(ent('organizacao', 'Câmara dos Deputados', `deputado(a) federal em ${ms.length} ${ms.length === 1 ? 'legislatura' : 'legislaturas'}`, { props: { 'nome civil': d.nomeCivil || '', partidos: [...new Set(ms.map((x) => x.siglaPartido))].join(', '), UF: [...new Set(ms.map((x) => x.siglaUf))].join(', '), legislaturas: ms.map((x) => x.idLegislatura).join(', '), perfil: `https://www.camara.leg.br/deputados/${id}` } }));
     for (const p of new Set(ms.map((x) => x.siglaPartido).filter(Boolean))) out.push(ent('organizacao', p, 'partido (Câmara)'));
-    if (d.municipioNascimento) out.push(ent('local', `${d.municipioNascimento} - ${d.ufNascimento}`, 'nasceu em'));
+    if (d.municipioNascimento) out.push(ent('local', [d.municipioNascimento, d.ufNascimento].filter(Boolean).join(' - '), 'nasceu em'));
     if (d.dataNascimento) props.nascimento = d.dataNascimento;
     if (d.escolaridade) props.escolaridade = d.escolaridade;
     if (d.ultimoStatus && d.ultimoStatus.email) out.push(ent('email', d.ultimoStatus.email, 'e-mail do gabinete'));
@@ -2056,7 +2065,8 @@ export const TRANSFORMACOES = [
   { id: 'contas', de: ['apelido'], nome: 'Procurar contas com este nome', fonte: `${SITES.length} sites`, rapida: true, run: contas },
   { id: 'github', de: ['apelido'], nome: 'Perfil, e-mails dos commits e chaves no GitHub', fonte: 'GitHub', run: github },
   { id: 'github-rede', de: ['apelido'], nome: 'Rede no GitHub (seguidores, seguidos, membros)', fonte: 'GitHub', run: githubRede },
-  { id: 'github-repos', de: ['apelido'], nome: 'Repositórios, linguagens e organizações', fonte: 'GitHub', run: githubRepos },
+  { id: 'github-commits', de: ['apelido', 'conta', 'url', 'email'], nome: 'Investigar os commits: fuso real, horários, e-mails, coautores, computador', fonte: 'GitHub', run: githubCommits },
+  { id: 'github-repos', de: ['apelido'], nome: 'Repositórios, linguagens e organizações', fonte: 'GitHub', run:githubRepos },
   { id: 'orcid-perfil', de: ['conta'], so: /orcid\.org\//, soAviso: 'Só serve para contas do ORCID.', nome: 'Perfil completo do ORCID (empregos, sites, e-mails)', fonte: 'ORCID', run: orcidPerfil },
   { id: 'conta-apelido', de: ['conta'], nome: 'Nome de usuário da conta', fonte: 'local', rapida: true, run: contaApelido },
   { id: 'telefone-wikidata', de: ['telefone'], nome: 'Organização com este telefone', fonte: 'Wikidata', run: telefoneWikidata },
@@ -2090,11 +2100,17 @@ export async function rodar(id, tipo, valor, ctx, completo) {
   if (!v) throw new Falha('valor vazio');
   if (tipo === 'ip' && !ehIP(v)) throw new Falha(`"${v}" não é um endereço IP`);
   if (tipo === 'dominio' && detectar(v) !== 'dominio') throw new Falha(`"${v}" não parece um domínio`);
+  // URL e e-mail malformados: um aviso claro em vez de "Invalid URL" ou uma consulta com "undefined"
+  if (tipo === 'url') { try { if (!/^https?:$/.test(new URL(v).protocol)) throw 0; } catch { throw new Falha(`"${v}" não é um endereço http ou https`); } }
+  if (tipo === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) throw new Falha(`"${v}" não parece um e-mail`);
   if (t.so && !t.so.test(v)) return { entidades: [], props: {}, aviso: t.soAviso || 'Esta transformação não serve para este valor.', alerta: false };
   const r = (await t.run(ctx, v, tipo === 'texto' ? completo : tipo)) || {};
+  // propriedade sem valor (undefined, null, NaN) não vai para a página: viraria "undefined" ou "null" no painel
+  const temValor = (x) => x != null && !(typeof x === 'number' && !Number.isFinite(x));
+  const limpa = (p) => Object.fromEntries(Object.entries(p || {}).filter(([, x]) => temValor(x)));
   // cada entidade sai com o id (a forma canônica): é por ele que a página junta o que já está no grafo
   const entidades = unicos((r.entidades || []).filter((e) => e.valor && !(e.tipo === tipo && e.valor === v && !e.de)))
-    .map((e) => ({ ...e, id: chave(e.tipo, e.valor), de: e.de ? { ...e.de, id: chave(e.de.tipo, e.de.valor) } : undefined }));
-  const props = Object.fromEntries(Object.entries(r.props || {}).filter(([, x]) => x !== '' && x != null));
+    .map((e) => ({ ...e, ...(e.props ? { props: limpa(e.props) } : {}), id: chave(e.tipo, e.valor), de: e.de ? { ...e.de, id: chave(e.de.tipo, e.de.valor) } : undefined }));
+  const props = Object.fromEntries(Object.entries(r.props || {}).filter(([, x]) => x !== '' && temValor(x)));
   return { entidades, props, aviso: r.aviso || '', alerta: !!r.alerta };
 }
