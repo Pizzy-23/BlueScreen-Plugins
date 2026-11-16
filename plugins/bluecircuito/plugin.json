@@ -1,0 +1,22 @@
+{
+  "id": "bluecircuito",
+  "name": "BlueCircuito",
+  "description": "Protótipos de automação com ESP32, Arduino e Raspberry Pi Pico desenhados por uma IA local (Claude Code, Codex, Gemini CLI ou Ollama): peças, ligações, fluxo e código, com conferência elétrica sem IA, simulação no Wokwi e gravação na placa.",
+  "version": "0.1.0",
+  "author": "Martin Hartfelder",
+  "license": "MIT",
+  "category": "desenvolvimento",
+  "keywords": ["esp32", "arduino", "raspberry pi pico", "eletrônica", "automação", "iot", "platformio", "wokwi", "esphome", "micropython", "ia", "protótipo"],
+  "icon": "icon.svg",
+  "order": 74,
+  "server": "server.mjs",
+  "settings": [
+    { "key": "iaProvedor", "label": "IA", "type": "select", "default": "agente", "options": [{ "value": "agente", "label": "Agentes de IA da IDE (Claude Code, Codex…)" }, { "value": "gemini", "label": "Gemini CLI" }, { "value": "ollama", "label": "Ollama neste PC" }], "help": "Quem projeta. Roda no seu PC e só lê: quem grava os arquivos é o BlueCircuito." },
+    { "key": "iaAgente", "label": "Agente da IDE", "default": "claude", "help": "O id do agente em Agentes de IA: claude, codex ou um que você cadastrou." },
+    { "key": "iaModelo", "label": "Modelo da IA", "default": "", "help": "Vazio: o do agente; qwen2.5-coder:7b no Ollama." },
+    { "key": "ollamaUrl", "label": "Endereço do Ollama", "default": "http://localhost:11434" },
+    { "key": "correcoes", "label": "Correções automáticas", "type": "number", "default": 2, "help": "Quantas vezes o BlueCircuito devolve para a IA os erros que a conferência elétrica achou, antes de mostrar para você (0 a 5)." },
+    { "key": "corrigirAvisos", "label": "Pedir correção também dos avisos", "type": "bool", "default": false, "help": "Desligado, só os erros (o que queima ou não funciona) voltam para a IA sozinhos." },
+    { "key": "pasta", "label": "Pasta dos projetos", "type": "folder", "default": "", "help": "Onde Salvar pasta e Gravar criam a pasta de cada projeto. Vazio: Documentos\\BlueCircuito." }
+  ]
+}
