@@ -13,7 +13,7 @@ Como escrever um plugin (a API `bs`, o servidor, o cofre, os nós do Automator) 
    set BLUESCREEN_PLUGIN_REPO=C:\caminho\do\seu\clone
    ```
    Com `BLUESCREEN_HOME` apontando para uma pasta vazia, a instância de teste não mexe nos seus plugins e dados. Confira no tema escuro e no claro.
-4. **Confira o padrão.** `node ferramentas/plugins.mjs tudo` (valida, roda os testes e confere as fichas). Se a ficha ou a tabela estiver desatualizada, `node ferramentas/plugins.mjs gerar` refaz.
+4. **Confira o padrão.** `node ferramentas/plugins.mjs tudo` (valida, roda os testes e confere as fichas). Se a ficha estiver desatualizada, `node ferramentas/plugins.mjs gerar` refaz.
 5. **Suba a versão** se mudou código (veja [Versões](#versões)).
 6. **Abra o pull request** para o `main` e preencha o modelo. O CI roda tudo de novo, mais a conferência de versão.
 

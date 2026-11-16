@@ -4,7 +4,7 @@
 //
 //   node ferramentas/plugins.mjs validar [id...]        confere manifesto, README, ícone, nós, sintaxe e segredos
 //   node ferramentas/plugins.mjs testes [id...]         roda os testes de cada plugin (tests/*.test.mjs)
-//   node ferramentas/plugins.mjs gerar [--conferir]     refaz a ficha dos READMEs e a tabela do README da raiz
+//   node ferramentas/plugins.mjs gerar [--conferir]     refaz a ficha dos READMEs dos plugins
 //   node ferramentas/plugins.mjs versoes [--base <ref>] plugin com código mudado precisa de versão maior que na base
 //   node ferramentas/plugins.mjs novo <id> --nome "Nome" --autor "Fulano" [--categoria x] [--servidor]
 //   node ferramentas/plugins.mjs tudo                   validar + testes + gerar --conferir (o que o CI roda)
@@ -55,7 +55,7 @@ const SEGREDOS = [
 ];
 
 // ---------- leitura ----------
-// CRLF vira LF: num clone do Windows (core.autocrlf) a ficha e a tabela não podem parecer desatualizadas
+// CRLF vira LF: num clone do Windows (core.autocrlf) a ficha não pode parecer desatualizada
 const lerTexto = (f) => fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 function arquivosDe(dir, rel = '') {
   const out = [];
@@ -233,17 +233,6 @@ export function validar(p) {
   return { erros, avisos };
 }
 
-// ---------- tabela do README da raiz ----------
-const TABELA_INICIO = '<!-- plugins:inicio (gerada por ferramentas/plugins.mjs: não edite à mão) -->';
-const TABELA_FIM = '<!-- plugins:fim -->';
-export function tabela(lista) {
-  const linhas = lista.map((p) => {
-    const m = p.manifesto;
-    return `| [${esc(m.name)}](plugins/${p.id}) | \`${p.id}\` | ${esc(CATEGORIAS[m.category] || m.category)} | ${esc(m.version)} | ${esc(m.author)} | ${esc(m.license === 'NOASSERTION' ? 'a definir' : m.license)} | ${esc(m.description)} |`;
-  });
-  return [TABELA_INICIO, '| Plugin | Pasta (id) | Categoria | Versão | Autor | Licença | O que faz |', '|---|---|---|---|---|---|---|', ...linhas, TABELA_FIM].join('\n');
-}
-
 // ---------- comandos ----------
 const cor = process.stdout.isTTY && !process.env.NO_COLOR ? (c, t) => `\x1b[${c}m${t}\x1b[0m` : (c, t) => t;
 const escolhidos = (args) => { const l = args.filter((x) => !x.startsWith('--')); const todos = ids(); for (const x of l) if (!todos.includes(x)) { console.error(`plugin desconhecido: ${x}`); process.exit(2); } return l.length ? l : todos; };
@@ -288,13 +277,8 @@ function cmdGerar(args) {
     const novo = comFicha(p.readme, p);
     if (novo !== p.readme) { mudou.push(`plugins/${p.id}/README.md`); if (!conferir) fs.writeFileSync(path.join(p.dir, 'README.md'), novo); }
   }
-  const arqRaiz = path.join(RAIZ, 'README.md');
-  const raiz = lerTexto(arqRaiz), i = raiz.indexOf(TABELA_INICIO.slice(0, 20)), f = raiz.indexOf(TABELA_FIM);
-  if (i < 0 || f < i) { console.error('README.md da raiz: faltam as marcas da tabela de plugins'); return 1; }
-  const novaRaiz = raiz.slice(0, i) + tabela(lista) + raiz.slice(f + TABELA_FIM.length);
-  if (novaRaiz !== raiz) { mudou.push('README.md'); if (!conferir) fs.writeFileSync(arqRaiz, novaRaiz); }
   if (conferir && mudou.length) { console.log(cor(31, 'Arquivos gerados desatualizados (rode node ferramentas/plugins.mjs gerar e commite):\n') + mudou.map((x) => '  ' + x).join('\n')); return 1; }
-  console.log(mudou.length ? `Atualizados:\n${mudou.map((x) => '  ' + x).join('\n')}` : 'Fichas e tabela em dia.');
+  console.log(mudou.length ? `Atualizados:\n${mudou.map((x) => '  ' + x).join('\n')}` : 'Fichas em dia.');
   return 0;
 }
 
